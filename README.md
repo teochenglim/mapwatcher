@@ -535,10 +535,10 @@ It drives everything — the Go binary embed, Docker image tag, and git tag.
 
 ```bash
 # 1. Bump the version
-echo "v1.0.0" > VERSION
+echo "v0.1.15" > VERSION
 
 # 2. Commit it
-git add VERSION && git commit -m "chore: release v1.0.0"
+git add . && git commit -m "chore: release v0.1.15"
 
 # 3. Tag + push — triggers the GitHub Actions release pipeline
 make release
