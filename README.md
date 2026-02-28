@@ -498,6 +498,9 @@ make docker-build
 
 # Push to ghcr.io (requires docker login)
 make docker-push
+
+# List all make targets
+make help
 ```
 
 Tests live in [`tests/`](tests/) and cover:
@@ -522,16 +525,28 @@ Two workflows ship out of the box:
 
 ### Publish a release
 
+Use the Makefile helpers to tag and push in one step:
+
 ```bash
-git tag v1.0.0
+# Create an annotated git tag locally
+make tag TAG=v1.0.0
+
+# Tag + push to GitHub (triggers the release workflow automatically)
+make release TAG=v1.0.0
+```
+
+Or manually:
+
+```bash
+git tag -a v1.0.0 -m "Release v1.0.0"
 git push origin v1.0.0
 ```
 
 The release workflow will automatically:
 1. Run tests
-2. Build binaries for linux/darwin/windows × amd64/arm64
+2. Build binaries for linux/darwin/windows × amd64/arm64 (via GoReleaser)
 3. Create a GitHub release with checksums
-4. Push `ghcr.io/teochenglim/mapwatch:1.0.0` and `:latest`
+4. Push `ghcr.io/teochenglim/mapwatch:1.0.0` and `:latest` to GHCR
 
 ---
 
@@ -545,6 +560,16 @@ The release workflow will automatically:
 | `u4pruyd`| Berlin         | ±0.15 km        |
 
 Generate geohashes at [geohash.org](http://geohash.org) or with `mmcloughlin/geohash`.
+
+---
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
+
+- How to write a **custom JS effect** (e.g. sound alerts, Slack notifications, custom overlays)
+- How to add a new **map tile theme** (dark mode, satellite, etc.)
+- Dev setup, test commands, and PR checklist
 
 ---
 

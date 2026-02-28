@@ -1,7 +1,6 @@
 # Contributing to MapWatch
 
-MapWatch is an open-source Prometheus Alertmanager receiver that renders firing alerts
-as live, geo-located markers on a map.
+MapWatch is an open-source Prometheus Alertmanager receiver that renders firing alerts as live, geo-located markers on a map.
 
 This guide covers the two most common extension points: **effects** and **themes**.
 
