@@ -3,7 +3,7 @@ MODULE    := github.com/teochenglim/mapwatch
 GO        := go
 GOFLAGS   := -trimpath
 LDFLAGS   := -s -w
-VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION   := $(strip $(shell cat VERSION))
 
 .PHONY: all build run test test-verbose lint tidy docker-build docker-push \
         tag release clean help
@@ -36,28 +36,26 @@ tidy:
 	$(GO) mod tidy
 	$(GO) mod verify
 
-## docker-build: build Docker image
+## docker-build: build Docker image tagged with VERSION and latest
 docker-build:
 	docker build -t ghcr.io/teochenglim/mapwatch:$(VERSION) -t ghcr.io/teochenglim/mapwatch:latest .
 
-## docker-push: push Docker image (requires docker login to ghcr.io)
+## docker-push: push Docker image to ghcr.io (requires docker login)
 docker-push:
 	docker push ghcr.io/teochenglim/mapwatch:$(VERSION)
 	docker push ghcr.io/teochenglim/mapwatch:latest
 
-## tag: create an annotated git tag  (usage: make tag TAG=v0.1.0)
+## tag: create an annotated git tag from the VERSION file
 tag:
-	@test -n "$(TAG)" || (echo "Usage: make tag TAG=v0.1.0" && exit 1)
-	@echo "Tagging $(TAG)…"
-	git tag -a $(TAG) -m "Release $(TAG)"
-	@echo "Push with: make release TAG=$(TAG)"
+	@echo "Tagging $(VERSION) (from VERSION file)…"
+	git tag -a $(VERSION) -m "Release $(VERSION)"
+	@echo "Push with: make release"
 
 ## release: tag + push to GitHub — triggers the Release GitHub Action
-##          (usage: make release TAG=v0.1.0)
 release: tag
-	@echo "Pushing tag $(TAG) to GitHub…"
-	git push origin $(TAG)
-	@echo "GitHub Actions will build, test and publish ghcr.io/teochenglim/mapwatch:$(TAG)"
+	@echo "Pushing $(VERSION) to GitHub…"
+	git push origin $(VERSION)
+	@echo "GitHub Actions will build and publish ghcr.io/teochenglim/mapwatch:$(VERSION)"
 
 ## clean: remove build artifacts
 clean:

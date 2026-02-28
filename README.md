@@ -483,8 +483,11 @@ and `_` as separator (e.g. `MAPWATCH_SERVER_ADDR=":9000"`).
 
 ## Building from source
 
+The version is read from the `VERSION` file at the repo root and embedded
+into the binary at compile time (`-X main.version`).
+
 ```bash
-# Build binary
+# Build binary  (version comes from VERSION file)
 make build
 
 # Run all tests  (tests/ folder, race detector on)
@@ -525,22 +528,24 @@ Two workflows ship out of the box:
 
 ### Publish a release
 
-Use the Makefile helpers to tag and push in one step:
+The `VERSION` file is the **single source of truth** for the version number.
+It drives everything — the Go binary embed, Docker image tag, and git tag.
+
+**Workflow:**
 
 ```bash
-# Create an annotated git tag locally
-make tag TAG=v1.0.0
+# 1. Bump the version
+echo "v1.0.0" > VERSION
 
-# Tag + push to GitHub (triggers the release workflow automatically)
-make release TAG=v1.0.0
+# 2. Commit it
+git add VERSION && git commit -m "chore: release v1.0.0"
+
+# 3. Tag + push — triggers the GitHub Actions release pipeline
+make release
 ```
 
-Or manually:
-
-```bash
-git tag -a v1.0.0 -m "Release v1.0.0"
-git push origin v1.0.0
-```
+`make release` reads `VERSION`, creates an annotated git tag, and pushes it.
+GoReleaser validates that the git tag matches `VERSION` before building binaries.
 
 The release workflow will automatically:
 1. Run tests
