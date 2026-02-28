@@ -1,0 +1,26 @@
+# Sample alert rules for the mapwatch demo.
+# These fire immediately (always-true expr) so you can see markers on the map
+# without needing real infrastructure.
+groups:
+  - name: demo-singapore
+    rules:
+      - alert: HighCPU
+        expr: vector(1)   # always fires — demo only
+        labels:
+          severity: critical
+          geohash: w21zd3         # Singapore CBD
+          instance: sg-prod-1
+          datacenter: sg-dc-1
+        annotations:
+          summary: "CPU usage above 90%"
+          description: "Instance sg-prod-1 CPU at 94% (demo)"
+
+      - alert: DiskFull
+        expr: vector(1)   # always fires — demo only
+        labels:
+          severity: warning
+          geohash: w21z8k         # Singapore West
+          instance: sg-prod-2
+          datacenter: sg-dc-2
+        annotations:
+          summary: "Disk usage above 85% (demo)"

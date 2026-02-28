@@ -1,0 +1,53 @@
+# ── mapwatch + Prometheus + Alertmanager ──────────────────────────────────────
+#
+# Quick start:
+#   docker compose up -d
+#   open http://localhost:8080
+#
+# Alertmanager webhook config (alertmanager.yml):
+#   receivers:
+#     - name: mapwatch
+#       webhook_configs:
+#         - url: http://mapwatch:8080/api/alerts
+#           send_resolved: true
+
+services:
+  mapwatch:
+    build: .
+    image: ghcr.io/teochenglim/mapwatch:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./mapwatch.yaml:/mapwatch.yaml:ro
+    environment:
+      MAPWATCH_SERVER_ADDR: ":8080"
+      MAPWATCH_PROMETHEUS_URL: "http://prometheus:9090"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./deploy/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:

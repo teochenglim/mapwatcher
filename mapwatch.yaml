@@ -1,0 +1,35 @@
+server:
+  addr: ":8080"
+
+prometheus:
+  url: http://prometheus:9090          # server → Prometheus (internal Docker hostname)
+  external_url: http://localhost:9090  # browser → Prometheus (override for remote deployments)
+  timeout: 10s
+
+spread:
+  radius: 0.01
+
+# Map datacenter/region label values to geohash strings.
+# Alerts with a "datacenter" or "region" label will be placed using this table.
+locations:
+  sg-dc-1: w21zd3
+  sg-dc-2: w21z8k
+  us-east-1: dr5reg
+  us-west-2: 9q8yy
+  eu-west-1: gc6uf
+
+# PromQL templates shown in the side panel when clicking a marker.
+# Key is the alertname; "default" is used as fallback for unknown alertnames.
+# Template variables are the alert's full label map: {{.instance}}, {{.datacenter}}, etc.
+query_templates:
+  HighCPU:
+    - label: "CPU Usage %"
+      query: 'rate(node_cpu_seconds_total{mode="user",instance="{{.instance}}"}[5m]) * 100'
+    - label: "Load Average 1m"
+      query: 'node_load1{instance="{{.instance}}"}'
+  DiskFull:
+    - label: "Disk Used %"
+      query: '100 - (node_filesystem_free_bytes{instance="{{.instance}}"} / node_filesystem_size_bytes{instance="{{.instance}}"} * 100)'
+  default:
+    - label: "CPU Usage %"
+      query: 'rate(node_cpu_seconds_total{mode="user",instance="{{.instance}}"}[5m]) * 100'
