@@ -20,14 +20,14 @@ func newMarker(id string, lat, lng float64) *marker.Marker {
 func TestStoreUpsert(t *testing.T) {
 	s := marker.NewStore(0.01)
 
-	if added := s.Upsert(newMarker("a", 1.35, 103.8)); !added {
+	if added, _ := s.Upsert(newMarker("a", 1.35, 103.8)); !added {
 		t.Fatal("expected true (new marker)")
 	}
 	if s.Get("a") == nil {
 		t.Fatal("marker not found after upsert")
 	}
 
-	if added := s.Upsert(newMarker("a", 1.36, 103.81)); added {
+	if added, _ := s.Upsert(newMarker("a", 1.36, 103.81)); added {
 		t.Fatal("expected false (update)")
 	}
 	if got := s.Get("a").Lat; got != 1.36 {

@@ -73,10 +73,20 @@ func TestAPIGetConfig(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	var cfg map[string]string
+	var cfg struct {
+		PrometheusURL string `json:"prometheusUrl"`
+		Locations     []struct {
+			Name string  `json:"name"`
+			Lat  float64 `json:"lat"`
+			Lng  float64 `json:"lng"`
+		} `json:"locations"`
+	}
 	decode(t, resp, &cfg)
-	if cfg["prometheusUrl"] != "http://localhost:9090" {
-		t.Errorf("unexpected prometheusUrl: %q", cfg["prometheusUrl"])
+	if cfg.PrometheusURL != "http://localhost:9090" {
+		t.Errorf("unexpected prometheusUrl: %q", cfg.PrometheusURL)
+	}
+	if len(cfg.Locations) != 1 {
+		t.Errorf("expected 1 location, got %d", len(cfg.Locations))
 	}
 }
 
