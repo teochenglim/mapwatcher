@@ -227,6 +227,65 @@
       stroke-width: 2;
       fill: rgba(88,166,255,.1);
     }
+
+    /* ── DC baseline marker wrap + count badge ── */
+    .mw-dc-wrap {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+    }
+    .mw-dc-badge {
+      position: absolute;
+      top: 0;
+      right: 0;
+      background: #f85149;
+      color: #fff;
+      border-radius: 50%;
+      width: 14px;
+      height: 14px;
+      font-size: 9px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1.5px solid #0d1117;
+      line-height: 1;
+    }
+
+    /* ── DC panel: severity bar ── */
+    .dc-sev-bar {
+      display: flex;
+      height: 6px;
+      border-radius: 3px;
+      overflow: hidden;
+      gap: 2px;
+    }
+    .dc-sev-seg { border-radius: 3px; }
+
+    /* ── DC panel: alert list items ── */
+    .dc-alert-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 10px 12px;
+      margin-bottom: 6px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .dc-alert-item:hover { border-color: #58a6ff; background: #161b22; }
+    .dc-alert-body   { flex: 1; min-width: 0; }
+    .dc-alert-name   { font-size: 13px; font-weight: 600; color: #e6edf3;
+                       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dc-alert-meta   { font-size: 11px; color: #8b949e; margin-top: 2px; }
+    .dc-alert-summary { font-size: 11px; color: #6e7681; margin-top: 2px;
+                        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dc-alert-arrow  { color: #8b949e; font-size: 12px; flex-shrink: 0; margin-top: 2px; }
   </style>
 </head>
 <body>
@@ -246,6 +305,9 @@
     <button class="tb-btn active" id="btn-dark"      onclick="MapWatch.setTheme('dark')">Dark</button>
     <button class="tb-btn"        id="btn-light"     onclick="MapWatch.setTheme('light')">Light</button>
     <button class="tb-btn"        id="btn-satellite" onclick="MapWatch.setTheme('satellite')">Satellite</button>
+    <div class="tb-sep"></div>
+    <button class="tb-btn" id="btn-heatmap"
+            onclick="if(MapWatch.toggleHeatmap){MapWatch.toggleHeatmap();this.classList.toggle('active')}">Heatmap</button>
   </div>
 
   <!-- Side panel -->

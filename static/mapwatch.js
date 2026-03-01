@@ -1,6 +1,7 @@
 /**
  * MapWatch — core client-side JS
- * Handles: WebSocket, marker management, clustering, side panel, themes.
+ * Handles: WebSocket, marker management, clustering, side panel, themes,
+ *          DC baseline markers, multi-alert aggregation.
  */
 (function () {
   'use strict';
@@ -33,25 +34,28 @@
 
   let map;
   let tileLayer;
-  let markerMap    = {};  // id → { leafletMarker, data }
+  // id → { leafletMarker (null for DC-owned alerts), data }
+  let markerMap    = {};
   let geoBoundsMap = {};  // id → L.Rectangle (hover overlay)
   let clusterGroup;       // L.markerClusterGroup (cluster mode)
   let spreadLayer;        // L.LayerGroup (spread mode)
   let clusterMode  = true;
   let bordersLayer = null;
   let bordersVisible = true;
-  let currentTheme = 'dark';
   let activeMarkerId = null;
+  let activeDCName   = null;  // currently open DC panel
   let ws;
   let wsReconnectTimer;
   let effects = {};
   // Prometheus external URL fetched from /api/config on startup.
   let prometheusURL = 'http://localhost:9090';
 
+  // DC baseline markers: name → { leafletMarker, alerts: {alertId→data}, lat, lng }
+  let dcMarkers = {};
+
   // ── Initialise map ────────────────────────────────────────────────────────────
 
   // Singapore bounding box — matches geo/slice.go RegionBounds["SG"]
-  // [minLat, minLng, maxLat, maxLng] in Leaflet order
   const SG_BOUNDS = [[1.159, 103.605], [1.482, 104.088]];
 
   function init() {
@@ -73,7 +77,7 @@
       maxZoom: 19,
     }).addTo(map);
 
-    clusterGroup = L.markerClusterGroup({ chunkedLoading: true });
+    clusterGroup = L.markerClusterGroup({ chunkedLoading: true, zoomToBoundsOnClick: false });
     spreadLayer  = L.layerGroup();
 
     clusterGroup.addTo(map);
@@ -83,7 +87,7 @@
       if (e.key === 'Escape') MapWatch.closePanel();
     });
 
-    // Fetch runtime config (Prometheus external URL, etc.) from server.
+    // Fetch runtime config (Prometheus external URL, locations, etc.) from server.
     fetchConfig();
     connectWS();
   }
@@ -95,8 +99,141 @@
       .then(r => r.json())
       .then(cfg => {
         if (cfg && cfg.prometheusUrl) prometheusURL = cfg.prometheusUrl;
+        if (cfg && cfg.locations && cfg.locations.length) initDCMarkers(cfg.locations);
       })
-      .catch(() => { /* use default */ });
+      .catch(() => { /* use defaults */ });
+  }
+
+  // ── DC baseline markers ───────────────────────────────────────────────────────
+  //
+  // Known infrastructure locations from config are shown as small green "healthy"
+  // dots.  When alerts fire for a DC, its dot changes colour/size and shows a count
+  // badge.  All alerts for one DC are aggregated into a single clickable marker.
+
+  function initDCMarkers(locations) {
+    for (const loc of locations) {
+      const lm = L.marker([loc.lat, loc.lng], {
+        icon: makeDCIcon(0, null),
+        zIndexOffset: -200,   // keep below alert markers
+      });
+      lm.bindTooltip(makeDCTooltipHtml(loc.name, {}), {
+        permanent: false, direction: 'top', className: 'mw-tooltip', opacity: 1,
+      });
+      lm.on('click', () => MapWatch.openDCPanel(loc.name));
+      dcMarkers[loc.name] = { leafletMarker: lm, alerts: {}, lat: loc.lat, lng: loc.lng };
+      lm.addTo(map);   // DC markers live directly on the map, not in cluster/spread
+    }
+  }
+
+  /**
+   * Build a Leaflet DivIcon for a DC marker.
+   * @param {number}      alertCount   number of active alerts (0 = healthy)
+   * @param {string|null} worstSev     worst severity among active alerts
+   */
+  function makeDCIcon(alertCount, worstSev) {
+    let color, pulse, dotSize;
+    if (alertCount === 0) {
+      color   = '#3fb950';  // green — healthy
+      pulse   = '';
+      dotSize = 14;
+    } else if (worstSev === 'critical') {
+      color   = SEVERITY_COLORS.critical;
+      pulse   = 'mw-pulse';
+      dotSize = 20;
+    } else if (worstSev === 'warning') {
+      color   = SEVERITY_COLORS.warning;
+      pulse   = '';
+      dotSize = 18;
+    } else {
+      color   = SEVERITY_COLORS.info;
+      pulse   = '';
+      dotSize = 16;
+    }
+
+    const margin  = (22 - dotSize) / 2;
+    const badge   = alertCount > 1
+      ? `<span class="mw-dc-badge">${alertCount > 99 ? '99+' : alertCount}</span>`
+      : '';
+
+    return L.divIcon({
+      className: '',
+      html: `<div class="mw-dc-wrap">` +
+              `<div class="mw-marker ${pulse}" ` +
+                   `style="background:${color};border-color:${color};` +
+                          `width:${dotSize}px;height:${dotSize}px;margin:${margin}px">` +
+              `</div>${badge}</div>`,
+      iconSize:      [28, 28],
+      iconAnchor:    [14, 14],
+      tooltipAnchor: [14, 0],
+    });
+  }
+
+  /** Tooltip content for a DC marker — shows up to 3 alerts, then "+N more". */
+  function makeDCTooltipHtml(name, alerts) {
+    const list  = Object.values(alerts);
+    const count = list.length;
+
+    if (count === 0) {
+      return `<div class="mw-tt">` +
+               `<div class="mw-tt-title">${e(name)}</div>` +
+               `<div class="mw-tt-sev" style="color:#3fb950">HEALTHY</div>` +
+             `</div>`;
+    }
+
+    const worst   = worstSeverityOf(list);
+    const preview = list.slice(0, 3).map(a => {
+      const col = severityColor(a.severity || 'unknown');
+      return `<div class="mw-tt-row" style="color:${col}">● ${e(a.alertname || a.id)}</div>`;
+    }).join('');
+    const more = count > 3
+      ? `<div class="mw-tt-row" style="color:#8b949e">…and ${count - 3} more</div>`
+      : '';
+
+    return `<div class="mw-tt">` +
+             `<div class="mw-tt-title">${e(name)}</div>` +
+             `<div class="mw-tt-sev" style="color:${severityColor(worst)}">` +
+               `${count} ALERT${count !== 1 ? 'S' : ''}` +
+             `</div>` +
+             preview + more +
+             `<div class="mw-tt-hint">Click to view all ↗</div>` +
+           `</div>`;
+  }
+
+  /** Return the worst severity label from an array of alert data objects. */
+  function worstSeverityOf(alerts) {
+    for (const a of alerts) if (a.severity === 'critical') return 'critical';
+    for (const a of alerts) if (a.severity === 'warning')  return 'warning';
+    return alerts.length ? (alerts[0].severity || 'unknown') : 'unknown';
+  }
+
+  /**
+   * Find which DC (if any) owns this alert.
+   * Matches by alert.labels.datacenter → dcMarkers key.
+   */
+  function getDCForAlert(data) {
+    if (data.labels && data.labels.datacenter) {
+      const name = data.labels.datacenter;
+      if (dcMarkers[name]) return name;
+    }
+    return null;
+  }
+
+  /** Recompute and redraw the DC marker icon + tooltip after its alert set changes. */
+  function updateDCMarker(dcName) {
+    const dc = dcMarkers[dcName];
+    if (!dc) return;
+    const list  = Object.values(dc.alerts);
+    const count = list.length;
+    const worst = count > 0 ? worstSeverityOf(list) : null;
+
+    dc.leafletMarker.setIcon(makeDCIcon(count, worst));
+    dc.leafletMarker.unbindTooltip();
+    dc.leafletMarker.bindTooltip(makeDCTooltipHtml(dcName, dc.alerts), {
+      permanent: false, direction: 'top', className: 'mw-tooltip', opacity: 1,
+    });
+
+    // Live-refresh the panel if this DC's panel is currently open.
+    if (activeDCName === dcName) renderDCPanel(dcName, dc.alerts);
   }
 
   // ── WebSocket ─────────────────────────────────────────────────────────────────
@@ -104,26 +241,30 @@
   function connectWS() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const url   = `${proto}://${location.host}/ws`;
+    console.log('[MapWatch] WS connecting to', url);
     ws = new WebSocket(url);
 
     ws.onopen = () => {
+      console.log('[MapWatch] WS connected');
       document.getElementById('ws-status').classList.add('connected');
       clearTimeout(wsReconnectTimer);
     };
 
-    ws.onclose = () => {
+    ws.onclose = (evt) => {
+      console.warn('[MapWatch] WS closed code=' + evt.code + ' reason=' + (evt.reason || 'none') + ' — reconnecting in 3s');
       document.getElementById('ws-status').classList.remove('connected');
       wsReconnectTimer = setTimeout(connectWS, 3000);
     };
 
     ws.onerror = (err) => {
-      console.error('WS error', err);
+      console.error('[MapWatch] WS error', err);
       ws.close();
     };
 
     ws.onmessage = (evt) => {
       let msg;
       try { msg = JSON.parse(evt.data); } catch { return; }
+      console.log('[MapWatch] WS event', msg.type, msg.marker ? 'id=' + msg.marker.id + ' sev=' + msg.marker.severity : 'id=' + msg.id);
       handleWSEvent(msg);
     };
   }
@@ -160,8 +301,8 @@
   }
 
   function makeTooltipHtml(d) {
-    const sev   = d.severity || 'unknown';
-    const color = severityColor(sev);
+    const sev      = d.severity || 'unknown';
+    const color    = severityColor(sev);
     const instance = (d.labels && d.labels.instance) || '';
     const dc       = (d.labels && d.labels.datacenter) || '';
     const summary  = (d.annotations && d.annotations.summary) || '';
@@ -174,30 +315,46 @@
     if (dc)       html += `<div class="mw-tt-row">DC: ${e(dc)}</div>`;
     if (summary)  html += `<div class="mw-tt-row">${e(summary)}</div>`;
 
-    html += `<div class="mw-tt-hint">Click to view in Prometheus ↗</div></div>`;
+    html += `<div class="mw-tt-hint">Click for details ↗</div></div>`;
     return html;
   }
 
   function upsertMarker(data, isNew) {
+    console.log('[MapWatch] upsertMarker', isNew ? 'ADD' : 'UPDATE', 'id=' + data.id,
+                'sev=' + data.severity, 'lat=' + data.lat, 'lng=' + data.lng);
+
+    // ── DC-owned alert: aggregate into the DC baseline marker ─────────────────
+    const dcName = getDCForAlert(data);
+    if (dcName) {
+      dcMarkers[dcName].alerts[data.id] = data;
+      updateDCMarker(dcName);
+      // Keep a markerMap entry (null leafletMarker) so openPanel / loadLinks work.
+      if (markerMap[data.id]) {
+        markerMap[data.id].data = data;
+      } else {
+        markerMap[data.id] = { leafletMarker: null, data };
+      }
+      return;
+    }
+
+    // ── Regular alert: individual Leaflet marker ───────────────────────────────
     if (markerMap[data.id]) {
-      // Update existing
       const { leafletMarker } = markerMap[data.id];
-      const lat = effectiveLat(data);
-      const lng = effectiveLng(data);
-      leafletMarker.setLatLng([lat, lng]);
-      leafletMarker.setIcon(makeIcon(data));
-      // Refresh tooltip content with latest data.
-      leafletMarker.unbindTooltip();
-      leafletMarker.bindTooltip(makeTooltipHtml(data), {
-        permanent: false, direction: 'top', className: 'mw-tooltip', opacity: 1,
-      });
+      if (leafletMarker) {
+        const lat = effectiveLat(data);
+        const lng = effectiveLng(data);
+        leafletMarker.setLatLng([lat, lng]);
+        leafletMarker.setIcon(makeIcon(data));
+        leafletMarker.unbindTooltip();
+        leafletMarker.bindTooltip(makeTooltipHtml(data), {
+          permanent: false, direction: 'top', className: 'mw-tooltip', opacity: 1,
+        });
+      }
       markerMap[data.id].data = data;
     } else {
-      // Create new
       const lat = effectiveLat(data);
       const lng = effectiveLng(data);
-
-      const lm = L.marker([lat, lng], { icon: makeIcon(data) });
+      const lm  = L.marker([lat, lng], { icon: makeIcon(data) });
 
       lm.bindTooltip(makeTooltipHtml(data), {
         permanent: false, direction: 'top', className: 'mw-tooltip', opacity: 1,
@@ -206,15 +363,27 @@
 
       markerMap[data.id] = { leafletMarker: lm, data };
       addToActiveLayer(lm);
+      console.log('[MapWatch] marker added to layer, pulse=' + (data.severity === 'critical'));
     }
   }
 
   function removeMarker(id) {
     if (!markerMap[id]) return;
-    const { leafletMarker } = markerMap[id];
-    clusterGroup.removeLayer(leafletMarker);
-    spreadLayer.removeLayer(leafletMarker);
+    const { leafletMarker, data } = markerMap[id];
+
+    // Remove from DC aggregation if this was a DC-owned alert.
+    const dcName = getDCForAlert(data);
+    if (dcName && dcMarkers[dcName]) {
+      delete dcMarkers[dcName].alerts[id];
+      updateDCMarker(dcName);
+    }
+
+    if (leafletMarker) {
+      clusterGroup.removeLayer(leafletMarker);
+      spreadLayer.removeLayer(leafletMarker);
+    }
     delete markerMap[id];
+
     if (geoBoundsMap[id]) {
       map.removeLayer(geoBoundsMap[id]);
       delete geoBoundsMap[id];
@@ -254,11 +423,10 @@
     if (clusterMode) return;
     clusterMode = true;
 
-    // Move all markers from spread → cluster
     spreadLayer.clearLayers();
     map.removeLayer(spreadLayer);
     for (const { leafletMarker } of Object.values(markerMap)) {
-      clusterGroup.addLayer(leafletMarker);
+      if (leafletMarker) clusterGroup.addLayer(leafletMarker);
     }
     clusterGroup.addTo(map);
 
@@ -273,7 +441,7 @@
     clusterGroup.clearLayers();
     map.removeLayer(clusterGroup);
     for (const { leafletMarker } of Object.values(markerMap)) {
-      spreadLayer.addLayer(leafletMarker);
+      if (leafletMarker) spreadLayer.addLayer(leafletMarker);
     }
     spreadLayer.addTo(map);
 
@@ -309,18 +477,111 @@
 
   // ── Side panel ────────────────────────────────────────────────────────────────
 
+  /** Open the individual alert detail panel. */
   function openPanel(id) {
     const entry = markerMap[id];
     if (!entry) return;
     activeMarkerId = id;
+    activeDCName   = null;
     renderPanel(entry.data);
     document.getElementById('panel').classList.add('open');
     loadLinks(id);
   }
 
+  /**
+   * Open the DC aggregated panel showing all alerts for a datacenter location.
+   * Each alert row is clickable to drill into individual alert details.
+   */
+  function openDCPanel(dcName) {
+    const dc = dcMarkers[dcName];
+    if (!dc) return;
+    activeDCName   = dcName;
+    activeMarkerId = null;
+    renderDCPanel(dcName, dc.alerts);
+    document.getElementById('panel').classList.add('open');
+  }
+
   function closePanel() {
     document.getElementById('panel').classList.remove('open');
     activeMarkerId = null;
+    activeDCName   = null;
+  }
+
+  /**
+   * Render the DC aggregated panel.
+   * Shows a severity summary bar, severity chips, and a scrollable alert list.
+   */
+  function renderDCPanel(dcName, alerts) {
+    const alertList = Object.values(alerts);
+    document.getElementById('panel-title').textContent = dcName;
+    const content = document.getElementById('panel-content');
+
+    if (alertList.length === 0) {
+      content.innerHTML =
+        `<div style="text-align:center;padding:32px 0;color:#3fb950">` +
+          `<div style="font-size:36px;margin-bottom:10px">✓</div>` +
+          `<div style="font-weight:600;font-size:14px">All systems operational</div>` +
+        `</div>`;
+      return;
+    }
+
+    // Severity summary bar — proportional colour segments.
+    const sevCounts = {};
+    for (const a of alertList) {
+      const s = a.severity || 'unknown';
+      sevCounts[s] = (sevCounts[s] || 0) + 1;
+    }
+    const total = alertList.length;
+    const SEV_ORDER = ['critical', 'warning', 'info', 'unknown'];
+    const barSegs = SEV_ORDER
+      .filter(s => sevCounts[s])
+      .map(s => {
+        const pct = ((sevCounts[s] / total) * 100).toFixed(1);
+        return `<div class="dc-sev-seg" style="width:${pct}%;background:${severityColor(s)}" ` +
+                    `title="${sevCounts[s]} ${s}"></div>`;
+      }).join('');
+
+    const chips = SEV_ORDER
+      .filter(s => sevCounts[s])
+      .map(s => {
+        const cls = SEVERITY_COLORS[s] ? s : 'unknown';
+        return `<span class="severity-badge sev-${cls}">${sevCounts[s]} ${s}</span>`;
+      }).join(' ');
+
+    // Sort alerts: critical first, then warning, info, unknown, then by startsAt desc.
+    const sevRank = { critical: 0, warning: 1, info: 2, unknown: 3 };
+    const sorted  = [...alertList].sort((a, b) => {
+      const sr = (sevRank[a.severity] || 3) - (sevRank[b.severity] || 3);
+      if (sr !== 0) return sr;
+      return new Date(b.startsAt || 0) - new Date(a.startsAt || 0);
+    });
+
+    const rows = sorted.map(a => {
+      const sev      = a.severity || 'unknown';
+      const cls      = SEVERITY_COLORS[sev] ? sev : 'unknown';
+      const inst     = (a.labels && a.labels.instance) || '';
+      const dur      = a.startsAt ? timeSince(new Date(a.startsAt)) : '';
+      const summary  = (a.annotations && a.annotations.summary) || '';
+      return `<div class="dc-alert-item" onclick="MapWatch.openPanel('${e(a.id)}')">` +
+               `<span class="severity-badge sev-${cls}">${sev}</span>` +
+               `<div class="dc-alert-body">` +
+                 `<div class="dc-alert-name">${e(a.alertname || a.id)}</div>` +
+                 (inst    ? `<div class="dc-alert-meta">${e(inst)}${dur ? ' · ' + e(dur) : ''}</div>` : '') +
+                 (summary ? `<div class="dc-alert-summary">${e(summary)}</div>` : '') +
+               `</div>` +
+               `<span class="dc-alert-arrow">↗</span>` +
+             `</div>`;
+    }).join('');
+
+    content.innerHTML =
+      `<div style="margin-bottom:14px">` +
+        `<div class="dc-sev-bar">${barSegs}</div>` +
+        `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">${chips}</div>` +
+      `</div>` +
+      `<div class="panel-section">` +
+        `<h3>${total} Active Alert${total !== 1 ? 's' : ''}</h3>` +
+        `<div id="dc-alert-list">${rows}</div>` +
+      `</div>`;
   }
 
   function renderPanel(m) {
@@ -361,8 +622,8 @@
   }
 
   function loadLinks(id) {
-    const loading  = document.getElementById('links-loading');
-    const errEl    = document.getElementById('links-error');
+    const loading   = document.getElementById('links-loading');
+    const errEl     = document.getElementById('links-error');
     const container = document.getElementById('links-container');
 
     if (!container) return;
@@ -393,8 +654,8 @@
 
   function timeSince(date) {
     const secs = Math.floor((Date.now() - date) / 1000);
-    if (secs < 60)   return secs + 's';
-    if (secs < 3600) return Math.floor(secs / 60) + 'm';
+    if (secs < 60)    return secs + 's';
+    if (secs < 3600)  return Math.floor(secs / 60) + 'm';
     if (secs < 86400) return Math.floor(secs / 3600) + 'h';
     return Math.floor(secs / 86400) + 'd';
   }
@@ -417,6 +678,7 @@
     setTheme,
     toggleBorders,
     openPanel,
+    openDCPanel,
     closePanel,
     // Exposed for static export mode (pre-load markers without WS)
     loadStaticMarkers(markers) {

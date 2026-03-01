@@ -268,10 +268,35 @@ query_templates:
 - Theme switcher in toolbar: dark / light / satellite
 - GeoJSON country border overlay (toggleable)
 
-### Marker rendering
-- Each marker rendered as a Leaflet CircleMarker or DivIcon
-- Color by severity: critical=red, warning=orange, info=blue, unknown=grey
-- Geohash markers optionally show bounding rectangle overlay on hover 
+### DC Baseline Markers
+Known datacenter locations defined in `config.locations` are shown as
+permanent green "healthy" dots on map load (before any alerts arrive).
+
+Behaviour state machine per DC location:
+
+| State    | Condition                    | Dot         | Animation  | Badge   |
+|----------|------------------------------|-------------|------------|---------|
+| Healthy  | 0 active alerts              | Green 14px  | —          | —       |
+| Info     | 1+ alerts, worst=info        | Blue 16px   | —          | if > 1  |
+| Warning  | 1+ alerts, worst=warning     | Yellow 18px | —          | if > 1  |
+| Critical | 1+ alerts, any=critical      | Red 20px    | CSS pulse  | if > 1  |
+
+When multiple alerts share a DC, the dot shows a count badge (top-right circle).
+Hovering shows a tooltip with up to 3 alert names (+"N more").
+Clicking opens the DC aggregated panel.
+
+### DC Aggregated Panel
+Opens when clicking a DC baseline marker. Shows:
+- Severity summary bar — proportional colour segments (red/yellow/blue)
+- Severity chips — count per severity level
+- Scrollable alert list sorted by: severity (worst first), then `startsAt` desc
+- Each row: severity badge + alert name + instance + duration
+- Click any row to drill into the individual alert detail panel
+
+### Marker rendering (individual alerts without a matching DC)
+- Each marker rendered as a Leaflet DivIcon
+- Color by severity: critical=red (#f85149), warning=yellow (#e3b341), info=blue (#58a6ff), unknown=grey
+- Geohash markers optionally show bounding rectangle overlay on hover
   (to visualize geohash precision)
 
 ### Marker effects (modular JS plugin system)
@@ -279,28 +304,24 @@ query_templates:
 MapWatch.registerEffect(name, handlerFn)
 ```
 Built-in effects:
-1. **severity-color** — fill color by severity label
-2. **blink-critical** — CSS keyframe pulse for severity=critical or P1
-3. **heatmap** — density overlay using Leaflet.heat for metric volume
-4. **geohash-grid** — on marker hover, draw geohash bounding rectangle
+1. **blink-critical** — CSS keyframe pulse for severity=critical
+2. **heatmap** — density overlay using Leaflet.heat; toggle via toolbar "Heatmap" button
+3. **geohash-grid** — on marker hover, draw geohash bounding rectangle
 
 ### Clustering and overlap handling
-- Toolbar toggle between **cluster mode** (Leaflet.markercluster) and 
+- Toolbar toggle between **cluster mode** (Leaflet.markercluster) and
   **spread mode** (deterministic circular offset for co-located markers)
 - In cluster mode: click cluster to expand, badge shows count
 - In spread mode: all markers individually visible with small positional offset
+- DC baseline markers are on a separate layer — always visible, not clustered
 
 ### On-click side panel (right drawer)
-Opens when user clicks any marker. Shows:
+Opens when user clicks any individual alert marker. Shows:
 - Alert name + severity badge (color-coded)
 - Instance / datacenter labels
 - Summary and description from annotations
 - Duration: `startsAt` to now, human readable
-- **uPlot time-series chart** — fetched from `/api/markers/:id/details`
-  - Loading spinner while fetching
-  - Multiple series if multiple query_template entries
-  - Graceful "Prometheus unavailable" error state if fetch fails
-  - Time range selector: 15m / 1h / 6h / 24h
+- Prometheus metric links from `query_templates` config
 - Raw labels section (collapsible)
 - Close button or Escape key to dismiss
 
@@ -314,6 +335,45 @@ Opens when user clicks any marker. Shows:
 
 On WebSocket connect: server replays all current markers as `marker.add` 
 events for full state sync on page load or reconnect.
+
+---
+
+## Logging and Observability
+
+### Server-side logs (Go `log` package, stderr)
+
+All server logs use the format: `prefix: key=value key=value`
+
+| Event | Log prefix | Required fields |
+|-------|-----------|-----------------|
+| WS upgrade request | `ws:` | `remote=<addr>` |
+| WS upgrade failure | `ws:` | `remote=<addr>`, `err=<msg>` |
+| WS client connected | `ws:` | `remote=<addr>`, `total=<n>` |
+| WS client disconnected | `ws:` | `remote=<addr>`, `remaining=<n>` |
+| WS marker replay on connect | `ws:` | `replaying=<n> markers` |
+| Hub broadcast | `hub:` | `type=<event-type>`, `clients=<n>` |
+| Hub buffer full | `hub:` | drop notice |
+| Alertmanager webhook | `alertmanager:` | `status=<firing\|resolved>`, `alerts=<n>` |
+| Alert geo resolved | `alertmanager:` | `fingerprint=`, `alertname=`, `geohash=`, `severity=` |
+| Alert geo skipped | `alertmanager:` | `fingerprint=`, `alertname=`, reason |
+| WS broadcast add | `ws:` | `id=`, `alertname=`, `severity=` |
+| WS broadcast remove | `ws:` | `id=` |
+| Processed webhook | `alertmanager:` | `added=<n>`, `updated=<n>`, `removed=<n>` |
+
+### Browser console logs (JS `console.log/warn/error`)
+
+All browser logs are prefixed with `[MapWatch]`.
+
+| Event | Level | Format |
+|-------|-------|--------|
+| WS connecting | `log` | `[MapWatch] WS connecting to <url>` |
+| WS connected | `log` | `[MapWatch] WS connected` |
+| WS closed | `warn` | `[MapWatch] WS closed code=<n> reason=<r> — reconnecting in 3s` |
+| WS error | `error` | `[MapWatch] WS error <err>` |
+| WS event received | `log` | `[MapWatch] WS event <type> id=<id> sev=<sev>` |
+| Marker upsert | `log` | `[MapWatch] upsertMarker ADD\|UPDATE id=<id> sev=<sev> lat=<n> lng=<n>` |
+| Marker added to layer | `log` | `[MapWatch] marker added to layer, pulse=<bool>` |
+| Effect error | `error` | `effect error: <err>` |
 
 ---
 

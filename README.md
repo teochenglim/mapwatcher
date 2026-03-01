@@ -6,6 +6,8 @@ MapWatch is an open-source Prometheus Alertmanager receiver that turns firing al
 into live, geo-located markers on a map. Add a `geohash` label to your alert rules,
 point Alertmanager at MapWatch, and your infrastructure lights up on the map in real time.
 
+![mapwatcher](images/output.png)
+
 ```
   Prometheus ──fires──► Alertmanager ──webhook──► MapWatch ──WebSocket──► Browser
                                                     :8080                  (map)
@@ -19,10 +21,13 @@ point Alertmanager at MapWatch, and your infrastructure lights up on the map in 
 
 - **Drop-in Alertmanager receiver** — add one `webhook_configs` entry; one dot per firing alert
 - **Geohash geo-encoding** — place alerts on the map with a single label: `geohash: w21zd3`
+- **DC baseline markers** — known datacenter locations from config appear as green "healthy" dots on load; turn red/yellow and blink when alerts fire for them
+- **Multi-alert aggregation** — multiple alerts at the same DC are aggregated onto one dot with a count badge; click to see a sorted list with severity summary bar
 - **Live updates via WebSocket** — dots appear, pulse, and disappear as alerts fire and resolve
 - **Critical alerts blink** — `severity: critical` triggers a CSS pulse animation automatically
 - **Click-to-Prometheus** — click any dot to open the matching PromQL query in Prometheus
 - **Cluster / Spread mode** — groups nearby alerts or fans them out so nothing overlaps
+- **Heatmap overlay** — density heat layer via Leaflet.heat (toggle in toolbar)
 - **Single binary, zero deps** — static assets embedded via `go:embed`; runs anywhere Go runs
 
 ---
@@ -34,17 +39,17 @@ Each example lives in [`examples/`](examples/) and is fully self-contained.
 
 | Example | Port | What it shows |
 |---------|------|---------------|
-| [blink-dot](examples/blink-dot/) | 8081 | CSS pulse animation on `severity=critical` markers |
-| [heatmap](examples/heatmap/)     | 8082 | Leaflet.heat density overlay across 13 global alerts |
+| [blink-dot](examples/blink-dot/) | 8081 | 5 green DC dots; 2 turn red — one with 1 alert, one with 2 alerts (badge) |
+| [heatmap](examples/heatmap/)     | 8082 | 4 green DC dots + heat density overlay with Singapore CBD hotspot |
 
 ```bash
-# Blink-dot — three critical (blinking) dots + one warning (solid) dot
+# Blink-dot — 5 green DC dots on load; 2 turn red ~15s later
 cd examples/blink-dot && docker compose up -d
 # open http://localhost:8081
 
-# Heatmap — 13 alerts across APAC/US/EU as a heat density layer
+# Heatmap — 4 green DC dots + 7 alerts; click "Heatmap" in toolbar
 cd examples/heatmap && docker compose up -d
-# open http://localhost:8082  →  MapWatch.toggleHeatmap() to enable overlay
+# open http://localhost:8082  →  click the "Heatmap" toolbar button
 ```
 
 See [`examples/README.md`](examples/README.md) for the full index.
@@ -75,14 +80,30 @@ This starts three services:
 
 Open **http://localhost:8080** in your browser.
 
-Within a few seconds you will see **two dots on Singapore**:
+You will see the demo unfold in two stages:
 
-| Marker       | Location             | Colour | Behaviour            |
-|--------------|----------------------|--------|----------------------|
-| HighCPU      | Singapore CBD        | Red    | **Blinking/pulsing** |
-| DiskFull     | Singapore West       | Yellow | Solid                |
+**Stage 1 — on page load (immediate):**
 
-> The blinking animation is triggered by `severity: critical`. Any alert with that label will pulse.
+| Dot     | Location         | Colour | Meaning      |
+|---------|------------------|--------|--------------|
+| sg-dc-1 | Singapore CBD    | Green  | DC healthy   |
+| sg-dc-2 | Singapore West   | Green  | DC healthy   |
+| sg-dc-3 | Singapore North  | Green  | DC healthy   |
+| sg-dc-4 | Singapore East   | Green  | DC healthy   |
+| sg-dc-5 | Singapore Central| Green  | DC healthy   |
+
+**Stage 2 — after ~15 seconds (when Alertmanager fires):**
+
+| Dot     | Location       | Colour | Behaviour                        |
+|---------|----------------|--------|----------------------------------|
+| sg-dc-1 | Singapore CBD  | Red    | **Blinking** — 1 alert           |
+| sg-dc-2 | Singapore West | Red    | **Blinking** — 2 alerts, badge ②  |
+| sg-dc-3 | Singapore North| Green  | Still healthy (no alerts)        |
+| sg-dc-4 | Singapore East | Green  | Still healthy (no alerts)        |
+| sg-dc-5 | Singapore Central| Green| Still healthy (no alerts)        |
+
+> Click **sg-dc-1** to see a single-alert detail panel.
+> Click **sg-dc-2** to see the aggregated panel — severity bar, count chips, and a scrollable list of both alerts.
 
 ### Step 3 — Interact with a marker
 
@@ -130,23 +151,24 @@ The dot disappears from the map in real time across all open browser tabs.
 
 ### How the demo alerts work
 
-The file `deploy/alerts.yml` contains two always-firing Prometheus rules:
+The file `deploy/alerts.yml` contains three always-firing Prometheus rules across two groups:
 
 ```yaml
+# group demo-cbd → 1 alert on sg-dc-1
 - alert: HighCPU
-  expr: vector(1)          # always evaluates to 1 → always fires
-  labels:
-    severity: critical
-    geohash: w21zd3        # → Singapore CBD
-    instance: sg-prod-1
+  labels: { severity: critical, datacenter: sg-dc-1, instance: sg-prod-cbd-1 }
 
+# group demo-west → 2 alerts on sg-dc-2
 - alert: DiskFull
-  expr: vector(1)
-  labels:
-    severity: warning
-    geohash: w21z8k        # → Singapore West
-    instance: sg-prod-2
+  labels: { severity: critical, datacenter: sg-dc-2, instance: sg-prod-west-1 }
+
+- alert: MemoryLeak
+  labels: { severity: critical, datacenter: sg-dc-2, instance: sg-prod-west-2 }
 ```
+
+All three use `vector(1)` so they fire immediately.  Alertmanager sends one webhook per group
+to `/api/alerts` — the two-group design means dc-1 and dc-2 fire independently without
+overwriting each other.
 
 Prometheus evaluates these every 15 s → fires to Alertmanager → Alertmanager POSTs to
 `http://mapwatch:8080/api/alerts` → MapWatch decodes the geohash → WebSocket pushes
@@ -414,7 +436,7 @@ mapwatch export --out snapshot.html
 
 | Method | Path                          | Description                                     |
 |--------|-------------------------------|-------------------------------------------------|
-| GET    | `/api/config`                 | Runtime config (Prometheus external URL)        |
+| GET    | `/api/config`                 | Runtime config (Prometheus URL + DC locations)  |
 | GET    | `/api/markers`                | List all active markers                         |
 | POST   | `/api/markers`                | Add / update a generic marker                   |
 | DELETE | `/api/markers/:id`            | Remove a marker                                 |
@@ -487,9 +509,9 @@ prometheus:
 spread:
   radius: 0.01                   # Degrees offset for co-located markers
 
-locations:                       # datacenter/region → geohash lookup
-  sg-dc-1: w21zd3
-  us-east-1: dr5reg
+locations:                       # datacenter/region → geohash lookup table
+  sg-dc-1: w21zd3               #   • Shown as green "healthy" dots on map load
+  us-east-1: dr5reg              #   • Alerts matching via `datacenter:` label aggregate onto the dot
 
 query_templates:                 # alertname → PromQL templates
   HighCPU:
@@ -559,10 +581,10 @@ It drives everything — the Go binary embed, Docker image tag, and git tag.
 
 ```bash
 # 1. Bump the version
-echo "v0.2.0" > VERSION
+echo "v0.2.2" > VERSION
 
 # 2. Commit it
-git add . && git commit -m "chore: release v0.2.0"
+git add . && git commit -m "chore: release v0.2.2"
 
 # 3. Tag + push — triggers the GitHub Actions release pipeline
 make release

@@ -1,10 +1,13 @@
-# ── mapwatch + Prometheus + Alertmanager ──────────────────────────────────────
+# ── MapWatch — Developer stack ────────────────────────────────────────────────
+#
+# Builds from source (requires Go toolchain / Docker buildkit).
+# For ready-to-run demos see examples/blink-dot/ and examples/heatmap/.
 #
 # Quick start:
 #   docker compose up -d
 #   open http://localhost:8080
 #
-# Alertmanager webhook config (alertmanager.yml):
+# Alertmanager webhook receiver config (already set in deploy/alertmanager.yml):
 #   receivers:
 #     - name: mapwatch
 #       webhook_configs:

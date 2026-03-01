@@ -1,26 +1,47 @@
-# Sample alert rules for the mapwatch demo.
-# These fire immediately (always-true expr) so you can see markers on the map
-# without needing real infrastructure.
+# MapWatch demo alert rules.
+#
+# These always-firing rules demonstrate the DC baseline marker feature:
+#   • 5 green dots appear immediately on page load (one per location in mapwatch.yaml)
+#   • sg-dc-1 (CBD)  → 1 alert fires  → dot turns red, no badge
+#   • sg-dc-2 (West) → 2 alerts fire  → dot turns red with badge "2"
+#   • sg-dc-3/4/5    → no alerts      → dots stay green (healthy)
+#
+# All rules use vector(1) so they fire immediately without real infrastructure.
+
 groups:
-  - name: demo-singapore
+  - name: demo-cbd
     rules:
       - alert: HighCPU
-        expr: vector(1)   # always fires — demo only
+        expr: vector(1)
+        for: 0s
         labels:
           severity: critical
-          geohash: w21zd3         # Singapore CBD
-          instance: sg-prod-1
           datacenter: sg-dc-1
+          instance: sg-prod-cbd-1
         annotations:
           summary: "CPU usage above 90%"
-          description: "Instance sg-prod-1 CPU at 94% (demo)"
+          description: "One critical alert on sg-dc-1 — dot turns red, no badge"
 
+  - name: demo-west
+    rules:
       - alert: DiskFull
-        expr: vector(1)   # always fires — demo only
+        expr: vector(1)
+        for: 0s
         labels:
-          severity: warning
-          geohash: w21z8k         # Singapore West
-          instance: sg-prod-2
+          severity: critical
           datacenter: sg-dc-2
+          instance: sg-prod-west-1
         annotations:
-          summary: "Disk usage above 85% (demo)"
+          summary: "Disk usage above 85%"
+          description: "First of two alerts on sg-dc-2"
+
+      - alert: MemoryLeak
+        expr: vector(1)
+        for: 0s
+        labels:
+          severity: critical
+          datacenter: sg-dc-2
+          instance: sg-prod-west-2
+        annotations:
+          summary: "Memory leak detected"
+          description: "Second alert on sg-dc-2 — dot shows badge '2', click for list"

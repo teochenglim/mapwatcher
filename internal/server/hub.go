@@ -48,10 +48,15 @@ func (h *Hub) Register(conn *websocket.Conn) {
 
 	h.mu.Lock()
 	h.clients[c] = struct{}{}
+	total := len(h.clients)
 	h.mu.Unlock()
 
+	log.Printf("ws: client connected remote=%s total=%d", conn.RemoteAddr(), total)
+
 	// Replay current state.
-	for _, m := range h.store.All() {
+	markers := h.store.All()
+	log.Printf("ws: replaying %d markers to new client", len(markers))
+	for _, m := range markers {
 		ev := WSEvent{Type: "marker.add", Marker: m}
 		if data, err := json.Marshal(ev); err == nil {
 			c.send <- data
@@ -63,8 +68,10 @@ func (h *Hub) Register(conn *websocket.Conn) {
 		defer func() {
 			h.mu.Lock()
 			delete(h.clients, c)
+			remaining := len(h.clients)
 			h.mu.Unlock()
 			conn.Close()
+			log.Printf("ws: client disconnected remote=%s remaining=%d", conn.RemoteAddr(), remaining)
 		}()
 		for {
 			select {
@@ -116,6 +123,7 @@ func (h *Hub) broadcast(ev WSEvent) {
 
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	log.Printf("hub: broadcasting type=%s to %d client(s)", ev.Type, len(h.clients))
 	for c := range h.clients {
 		select {
 		case c.send <- data:

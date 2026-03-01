@@ -5,16 +5,13 @@ prometheus:
   url: http://prometheus:9090
   timeout: 10s
 
-# Datacenter/region label → geohash lookup.
+# Known Singapore datacenter locations — rendered as baseline green dots on load.
+# Alerts referencing these via `datacenter:` label are aggregated onto the DC dot.
 locations:
-  sg-dc-1:         w21zd3   # Singapore CBD
-  sg-dc-2:         w21z8k   # Singapore West
-  ap-northeast-1:  xn774c   # Tokyo (approximate)
-  ap-southeast-2:  r3gx2u   # Sydney (approximate)
-  us-east-1:       dr5reg   # New York
-  us-west-2:       9q8yy    # Los Angeles
-  eu-west-1:       gc6uf    # Dublin
-  eu-central-1:    u4pruyd  # Berlin
+  sg-cbd:    w21zd3   # Singapore CBD / Raffles Place
+  sg-east:   w21ze    # Singapore East (Tampines/Changi)
+  sg-north:  w21zb    # Singapore North (Woodlands/Yishun)
+  sg-west:   w21z8k   # Singapore West (Jurong)
 
 # PromQL templates shown in the side panel when clicking a marker.
 query_templates:

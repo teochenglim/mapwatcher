@@ -1,60 +1,47 @@
 # Blink-dot demo alert rules.
 #
-# All four rules use vector(1) so they fire immediately without real metrics.
+# Demonstrates the DC baseline marker feature and multi-alert aggregation:
+#   • 5 green dots appear immediately (one per location in mapwatch.yaml)
+#   • sg-dc-1 (CBD)  → 1 critical alert  → dot turns red, no badge
+#   • sg-dc-2 (West) → 2 critical alerts → dot turns red with badge "2"
+#   • sg-dc-3/4/5    → no alerts         → stay green (healthy)
 #
-# severity=critical  →  dot gets the CSS pulse/blink animation (mw-pulse class)
-# severity=warning   →  solid yellow dot, no animation
-#
-# Geo is resolved from the geohash label.  See mapwatch.yaml for the
-# datacenter → geohash location table used by some alerts.
+# All rules use vector(1) so they fire immediately without real metrics.
 
 groups:
-  - name: blink-dot-demo
+  - name: blink-dot-cbd
     rules:
       - alert: HighCPU
-        expr: vector(1)   # always fires — demo only
+        expr: vector(1)
         for: 0s
         labels:
           severity: critical
-          geohash: w21zd3         # Singapore CBD  (1.29°N 103.85°E)
-          instance: sg-prod-1
           datacenter: sg-dc-1
+          instance: sg-prod-cbd-1
         annotations:
-          summary: "CPU above 90% — this dot blinks"
-          description: "severity=critical triggers the CSS pulse animation on this marker"
+          summary: "CPU above 90% — single alert on sg-dc-1 (no badge)"
+          description: "Click the dot to see the alert detail panel"
+
+  - name: blink-dot-west
+    rules:
+      - alert: DiskFull
+        expr: vector(1)
+        for: 0s
+        labels:
+          severity: critical
+          datacenter: sg-dc-2
+          instance: sg-prod-west-1
+        annotations:
+          summary: "Disk usage above 85%"
+          description: "First of two alerts on sg-dc-2"
 
       - alert: MemoryLeak
-        expr: vector(1)   # always fires — demo only
+        expr: vector(1)
         for: 0s
         labels:
           severity: critical
-          geohash: dr5reg         # New York  (40.71°N 74.01°W)
-          instance: ny-prod-1
-          datacenter: us-east-1
+          datacenter: sg-dc-2
+          instance: sg-prod-west-2
         annotations:
-          summary: "Memory usage critical — this dot blinks"
-          description: "Critical severity triggers the blinking pulse on this NY marker"
-
-      - alert: ServiceDown
-        expr: vector(1)   # always fires — demo only
-        for: 0s
-        labels:
-          severity: critical
-          geohash: gc6uf          # Dublin / EU West  (53.33°N 6.24°W)
-          instance: eu-prod-1
-          datacenter: eu-west-1
-        annotations:
-          summary: "Service unreachable — this dot blinks"
-          description: "A third continent, a third blinking dot"
-
-      - alert: DiskWarning
-        expr: vector(1)   # always fires — demo only
-        for: 0s
-        labels:
-          severity: warning
-          geohash: 9q8yy          # Los Angeles / US West  (34.05°N 118.25°W)
-          instance: us-prod-1
-          datacenter: us-west-2
-        annotations:
-          summary: "Disk at 80% — solid dot (warning, no blink)"
-          description: "severity=warning renders as a solid yellow dot without animation"
+          summary: "Memory leak detected"
+          description: "Second alert on sg-dc-2 — dot shows badge '2', click for list"

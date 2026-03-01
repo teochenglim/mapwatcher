@@ -59,16 +59,32 @@ func NewStore(spreadRadius float64) *Store {
 	}
 }
 
-// Upsert adds or updates a marker. It returns whether the marker was newly added
-// (true) or updated (false).
-func (s *Store) Upsert(m *Marker) bool {
+// Upsert adds or updates a marker. Returns (isNew bool, colocated []*Marker)
+// where colocated contains other markers sharing the same base position whose
+// offsets may have changed due to recomputeOffsets.
+func (s *Store) Upsert(m *Marker) (bool, []*Marker) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, exists := s.markers[m.ID]
 	m.UpdatedAt = time.Now()
 	s.markers[m.ID] = m
 	s.recomputeOffsets()
-	return !exists
+
+	// Collect co-located markers (same base position, different ID).
+	precision := 1e4
+	mLat := int64(math.Round(m.Lat * precision))
+	mLng := int64(math.Round(m.Lng * precision))
+	var colocated []*Marker
+	for _, existing := range s.markers {
+		if existing.ID == m.ID {
+			continue
+		}
+		if int64(math.Round(existing.Lat*precision)) == mLat &&
+			int64(math.Round(existing.Lng*precision)) == mLng {
+			colocated = append(colocated, existing)
+		}
+	}
+	return !exists, colocated
 }
 
 // Remove deletes a marker by ID. Returns true if it existed.

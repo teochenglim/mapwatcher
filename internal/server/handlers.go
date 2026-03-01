@@ -23,6 +23,7 @@ type Handlers struct {
 	amTrans         *transformer.AlertmanagerTransformer
 	promProxy       *transformer.PromProxy
 	promExternalURL string
+	locations       map[string]string // name → geohash, for /api/config baseline dots
 	upgrader        *websocket.Upgrader
 }
 
@@ -41,6 +42,11 @@ func (h *Handlers) GetMarkers(w http.ResponseWriter, r *http.Request) {
 }
 
 // PostAlerts handles POST /api/alerts (Alertmanager webhook)
+//
+// Alertmanager sends one webhook per alert group, not one webhook for all alerts.
+// Using Reconcile (which removes everything not in the payload) would delete markers
+// from other groups on every call.  Instead we upsert firing alerts and explicitly
+// remove resolved ones so markers from concurrent groups coexist correctly.
 func (h *Handlers) PostAlerts(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
 	if err != nil {
@@ -48,33 +54,45 @@ func (h *Handlers) PostAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	incoming, err := h.amTrans.Transform(body)
+	firing, resolvedIDs, err := h.amTrans.TransformPayload(body)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
-	// Reconcile firing alerts: add/update present, remove absent.
-	added, updated, removed := h.store.Reconcile(incoming)
+	var added, updated, removed int
 
-	for _, id := range added {
-		if m := h.store.Get(id); m != nil {
+	// Upsert firing alerts — never touches markers from other groups.
+	for _, m := range firing {
+		isNew, colocated := h.store.Upsert(m)
+		if isNew {
+			log.Printf("ws: broadcast add id=%s alertname=%s severity=%s", m.ID, m.AlertName, m.Severity)
 			h.hub.BroadcastAdd(m)
-		}
-	}
-	for _, id := range updated {
-		if m := h.store.Get(id); m != nil {
+			added++
+		} else {
 			h.hub.BroadcastUpdate(m)
+			updated++
 		}
-	}
-	for _, id := range removed {
-		h.hub.BroadcastRemove(id)
+		// Broadcast offset updates for co-located markers (their offsets changed).
+		for _, co := range colocated {
+			h.hub.BroadcastUpdate(co)
+		}
 	}
 
+	// Remove resolved alerts explicitly.
+	for _, id := range resolvedIDs {
+		if h.store.Remove(id) {
+			log.Printf("ws: broadcast remove id=%s", id)
+			h.hub.BroadcastRemove(id)
+			removed++
+		}
+	}
+
+	log.Printf("alertmanager: processed added=%d updated=%d removed=%d", added, updated, removed)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"added":   len(added),
-		"updated": len(updated),
-		"removed": len(removed),
+		"added":   added,
+		"updated": updated,
+		"removed": removed,
 	})
 }
 
@@ -106,11 +124,14 @@ func (h *Handlers) PostMarkers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	added := h.store.Upsert(&m)
-	if added {
+	isNew, colocated := h.store.Upsert(&m)
+	if isNew {
 		h.hub.BroadcastAdd(&m)
 	} else {
 		h.hub.BroadcastUpdate(&m)
+	}
+	for _, co := range colocated {
+		h.hub.BroadcastUpdate(co)
 	}
 	writeJSON(w, http.StatusOK, &m)
 }
@@ -190,16 +211,29 @@ func (h *Handlers) GetMarkerLinks(w http.ResponseWriter, r *http.Request) {
 
 // GetConfig handles GET /api/config — exposes non-sensitive runtime config to the frontend.
 func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
+	type locItem struct {
+		Name string  `json:"name"`
+		Lat  float64 `json:"lat"`
+		Lng  float64 `json:"lng"`
+	}
+	locs := make([]locItem, 0, len(h.locations))
+	for name, hash := range h.locations {
+		if center, _, err := geo.DecodeGeohash(hash); err == nil {
+			locs = append(locs, locItem{Name: name, Lat: center.Lat, Lng: center.Lng})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"prometheusUrl": h.promExternalURL,
+		"locations":     locs,
 	})
 }
 
 // ServeWS handles GET /ws — WebSocket upgrade.
 func (h *Handlers) ServeWS(w http.ResponseWriter, r *http.Request) {
+	log.Printf("ws: upgrade request from %s", r.RemoteAddr)
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("ws upgrade: %v", err)
+		log.Printf("ws: upgrade failed from %s: %v", r.RemoteAddr, err)
 		return
 	}
 	h.hub.Register(conn)

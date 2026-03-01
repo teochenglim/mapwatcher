@@ -45,22 +45,38 @@ func (t *AlertmanagerTransformer) Name() string { return "alertmanager" }
 
 // Transform parses an Alertmanager webhook payload and returns one Marker per alert.
 // Alerts with unresolvable geo are skipped with a warning log.
+// Implements the Transformer interface (returns only firing markers).
 func (t *AlertmanagerTransformer) Transform(payload []byte) ([]*marker.Marker, error) {
+	firing, _, err := t.TransformPayload(payload)
+	return firing, err
+}
+
+// TransformPayload parses an Alertmanager webhook payload and returns separate
+// slices for firing markers and resolved fingerprints.
+// Use this instead of Transform so that resolved alerts are properly removed.
+func (t *AlertmanagerTransformer) TransformPayload(payload []byte) (firing []*marker.Marker, resolvedIDs []string, err error) {
 	var p amPayload
-	if err := json.Unmarshal(payload, &p); err != nil {
-		return nil, fmt.Errorf("alertmanager: unmarshal payload: %w", err)
+	if err = json.Unmarshal(payload, &p); err != nil {
+		return nil, nil, fmt.Errorf("alertmanager: unmarshal payload: %w", err)
 	}
 
-	markers := make([]*marker.Marker, 0, len(p.Alerts))
+	log.Printf("alertmanager: webhook received status=%s alerts=%d", p.Status, len(p.Alerts))
+
 	for _, a := range p.Alerts {
-		m, err := t.alertToMarker(a)
-		if err != nil {
-			log.Printf("alertmanager: skipping alert %q: %v", a.Fingerprint, err)
+		if a.Status == "resolved" {
+			log.Printf("alertmanager: resolved fingerprint=%s alertname=%s", a.Fingerprint, a.Labels["alertname"])
+			resolvedIDs = append(resolvedIDs, a.Fingerprint)
 			continue
 		}
-		markers = append(markers, m)
+		m, merr := t.alertToMarker(a)
+		if merr != nil {
+			log.Printf("alertmanager: skipping alert fingerprint=%s alertname=%s: %v", a.Fingerprint, a.Labels["alertname"], merr)
+			continue
+		}
+		log.Printf("alertmanager: firing fingerprint=%s alertname=%s geohash=%s severity=%s", m.ID, m.AlertName, m.Geohash, m.Severity)
+		firing = append(firing, m)
 	}
-	return markers, nil
+	return firing, resolvedIDs, nil
 }
 
 func (t *AlertmanagerTransformer) alertToMarker(a amAlert) (*marker.Marker, error) {

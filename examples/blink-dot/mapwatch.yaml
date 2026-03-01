@@ -5,20 +5,23 @@ prometheus:
   url: http://prometheus:9090
   timeout: 10s
 
-# Datacenter/region label → geohash lookup.
-# Alerts that carry a `datacenter` label are resolved through this table.
+# Five Singapore datacenters — shown as green baseline dots on map load.
+# sg-dc-1 fires 1 alert; sg-dc-2 fires 2 alerts; the rest stay healthy (green).
 locations:
-  sg-dc-1:  w21zd3   # Singapore CBD
-  sg-dc-2:  w21z8k   # Singapore West
-  us-east-1: dr5reg  # New York
-  us-west-2: 9q8yy   # Los Angeles
-  eu-west-1: gc6uf   # Dublin
+  sg-dc-1: w21zd3   # Singapore CBD
+  sg-dc-2: w21z8k   # Singapore West
+  sg-dc-3: w21zb    # Singapore North
+  sg-dc-4: w21ze    # Singapore East
+  sg-dc-5: w21z9    # Singapore Central
 
-# PromQL templates shown in the side panel when clicking a marker.
+# PromQL templates shown in the side panel when clicking an alert.
 query_templates:
   HighCPU:
     - label: "CPU Usage %"
       query: 'rate(node_cpu_seconds_total{mode="user",instance="{{.instance}}"}[5m]) * 100'
+  DiskFull:
+    - label: "Disk Used %"
+      query: '100 - (node_filesystem_free_bytes{instance="{{.instance}}"} / node_filesystem_size_bytes * 100)'
   MemoryLeak:
     - label: "Memory Used %"
       query: '100 - (node_memory_MemAvailable_bytes{instance="{{.instance}}"} / node_memory_MemTotal_bytes * 100)'

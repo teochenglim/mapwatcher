@@ -1,13 +1,14 @@
 # Example: Blink-dot
 
-Demonstrates the **CSS pulse animation** that fires on `severity=critical` markers.
+Demonstrates **DC baseline markers** and **multi-alert aggregation**.
 
-Three critical alerts blink across Singapore, New York, and Dublin.
-A fourth warning alert in Los Angeles renders as a solid yellow dot — no blink.
+Five known datacenter locations appear as **green healthy dots** on page load.
+When Prometheus fires, two DCs turn **red and blink** — one with a single alert,
+one with two alerts (count badge). The other three DCs stay green.
 
 ```
-  Prometheus ──fires──► Alertmanager ──webhook──► MapWatch ──WebSocket──► Browser
-    vector(1)                                       :8081                  (map)
+Prometheus ──(vector(1) always fires)──► Alertmanager ──webhook──► MapWatch ──WebSocket──► Browser
+                                                          :9094       :8081                  (map)
 ```
 
 ---
@@ -25,58 +26,115 @@ docker compose up -d
 | Prometheus   | http://localhost:9091   |
 | Alertmanager | http://localhost:9094   |
 
-Open **http://localhost:8081**.  Within 15–30 seconds you will see four dots appear:
+Open **http://localhost:8081** and watch the map unfold in two stages:
 
-| Alert        | Location         | Colour | Animation          |
-|--------------|------------------|--------|--------------------|
-| HighCPU      | Singapore CBD    | Red    | **Blinking/pulse** |
-| MemoryLeak   | New York         | Red    | **Blinking/pulse** |
-| ServiceDown  | Dublin / EU West | Red    | **Blinking/pulse** |
-| DiskWarning  | Los Angeles      | Yellow | Solid (no blink)   |
+**Stage 1 — on page load (immediate):**
+
+| Dot     | Location          | Colour | Meaning    |
+|---------|-------------------|--------|------------|
+| sg-dc-1 | Singapore CBD     | Green  | DC healthy |
+| sg-dc-2 | Singapore West    | Green  | DC healthy |
+| sg-dc-3 | Singapore North   | Green  | DC healthy |
+| sg-dc-4 | Singapore East    | Green  | DC healthy |
+| sg-dc-5 | Singapore Central | Green  | DC healthy |
+
+**Stage 2 — after ~15 seconds:**
+
+| Dot     | Location       | Colour | Behaviour                          |
+|---------|----------------|--------|------------------------------------|
+| sg-dc-1 | Singapore CBD  | Red    | **Blinking** — 1 alert             |
+| sg-dc-2 | Singapore West | Red    | **Blinking** — 2 alerts, badge ②   |
+| sg-dc-3 | North          | Green  | Still healthy                      |
+| sg-dc-4 | East           | Green  | Still healthy                      |
+| sg-dc-5 | Central        | Green  | Still healthy                      |
 
 ---
 
-## How the blink animation works
+## What to try
 
-MapWatch applies the `mw-pulse` CSS class to any marker where:
-- `severity == "critical"`, **or**
-- `labels.priority == "P1"`
+**Hover** any dot to see a tooltip:
+- Green dot: shows "HEALTHY"
+- Red dot with 1 alert: shows the alert name + instance
+- Red dot with 2 alerts: shows both alert names + "Click to view all ↗"
 
-The animation is pure CSS — no JS timers or polling. It is implemented in
-`static/effects/blink.js` and registered as the `blink-critical` effect:
+**Click sg-dc-1** (CBD, 1 alert) → individual alert detail panel with Prometheus links.
+
+**Click sg-dc-2** (West, 2 alerts) → aggregated DC panel:
+- Severity bar (proportional red segments)
+- Count chip: `2 critical`
+- Alert list sorted by severity — click any row to drill into that alert's details
+
+---
+
+## How DC baseline markers work
+
+On page load, `mapwatch.js` fetches `/api/config` which returns the `locations` table
+decoded to lat/lng.  Each location becomes a small **green Leaflet marker** added
+directly to the map (separate layer — never clustered).
+
+When an alert arrives with `datacenter: sg-dc-2`, `mapwatch.js` aggregates it onto
+the `sg-dc-2` DC marker instead of creating an individual dot.  The DC marker
+updates its colour, size, CSS animation, and count badge automatically.
 
 ```js
-MapWatch.registerEffect('blink-critical', function (event, map, markerMap) {
-  const isPulsing = m.severity === 'critical' || (m.labels && m.labels.priority === 'P1');
-  dot.classList.toggle('mw-pulse', isPulsing);
-});
+// The DC matching logic in mapwatch.js:
+function getDCForAlert(data) {
+  if (data.labels && data.labels.datacenter) {
+    const name = data.labels.datacenter;
+    if (dcMarkers[name]) return name;  // aggregate onto DC dot
+  }
+  return null;  // render as individual marker
+}
+```
+
+The CSS pulse animation on the DC dot:
+
+```css
+@keyframes mw-pulse {
+  0%   { box-shadow: 0 0 0 0    rgba(248,81,73,.85); }
+  70%  { box-shadow: 0 0 0 16px rgba(248,81,73,0);   }
+  100% { box-shadow: 0 0 0 0    rgba(248,81,73,0);   }
+}
+.mw-pulse { animation: mw-pulse 1.4s ease-out infinite; }
 ```
 
 ---
 
-## Send a custom blinking marker via curl
+## Inject your own alerts via curl (no Prometheus needed)
 
-You can inject markers directly without Prometheus:
+Add a third alert to sg-dc-2 — the badge will update to ③:
 
 ```bash
-# Blinking marker at Tokyo
 curl -s -XPOST http://localhost:8081/api/markers \
   -H 'Content-Type: application/json' \
   -d '{
-    "id":        "manual-tokyo-1",
-    "lat":       35.68,
-    "lng":       139.69,
-    "severity":  "critical",
-    "alertname": "ManualTest",
-    "labels":    { "instance": "jp-prod-1", "datacenter": "ap-northeast-1" },
-    "annotations": { "summary": "Manually injected blinking dot" }
+    "id":      "manual-west-3",
+    "geohash": "w21z8k",
+    "severity": "critical",
+    "labels":  { "instance": "sg-manual-3", "datacenter": "sg-dc-2" },
+    "annotations": { "summary": "Third alert — badge becomes 3" }
   }'
 ```
 
-Remove it:
+Add a warning to a healthy DC (sg-dc-3) — the dot turns yellow:
 
 ```bash
-curl -s -XDELETE http://localhost:8081/api/markers/manual-tokyo-1
+curl -s -XPOST http://localhost:8081/api/markers \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "id":      "manual-north-1",
+    "geohash": "w21zb",
+    "severity": "warning",
+    "labels":  { "instance": "sg-manual-n", "datacenter": "sg-dc-3" },
+    "annotations": { "summary": "Warning — North DC dot turns yellow" }
+  }'
+```
+
+Remove them:
+
+```bash
+curl -s -XDELETE http://localhost:8081/api/markers/manual-west-3
+curl -s -XDELETE http://localhost:8081/api/markers/manual-north-1
 ```
 
 ---
