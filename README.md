@@ -21,12 +21,13 @@ point Alertmanager at MapWatch, and your infrastructure lights up on the map in 
 
 - **Drop-in Alertmanager receiver** — add one `webhook_configs` entry; one dot per firing alert
 - **Geohash geo-encoding** — place alerts on the map with a single label: `geohash: w21zd3`
-- **DC baseline markers** — known datacenter locations from config appear as green "healthy" dots on load; turn red/yellow and blink when alerts fire for them
-- **Multi-alert aggregation** — multiple alerts at the same DC are aggregated onto one dot with a count badge; click to see a sorted list with severity summary bar
+- **DC baseline markers** — known datacenter locations appear as gently-breathing green dots; turn red/yellow and blink when alerts fire
+- **Multi-alert aggregation** — multiple alerts at the same DC aggregate onto one dot with a count badge; click to see a sorted severity bar + alert list
 - **Live updates via WebSocket** — dots appear, pulse, and disappear as alerts fire and resolve
 - **Critical alerts blink** — `severity: critical` triggers a CSS pulse animation automatically
 - **Click-to-Prometheus** — click any dot to open the matching PromQL query in Prometheus
-- **Choropleth heatmap** — pre-defined geographic regions coloured by severity (like a US state map); toggle in toolbar
+- **Choropleth heatmap** — rectangular region overlays coloured by severity; shown by default, empty regions as grey outlines; toggle off via toolbar
+- **Mouse coordinate display** — hover anywhere on the map to see live `lat, lng` (for tuning region bounds)
 - **Single binary, zero deps** — static assets embedded via `go:embed`; runs anywhere Go runs
 
 ---
@@ -38,17 +39,11 @@ Each example lives in [`examples/`](examples/) and is fully self-contained.
 
 | Example | Port | What it shows |
 |---------|------|---------------|
-| [blink-dot](examples/blink-dot/) | 8081 | 5 green DC dots; 2 turn red — one with 1 alert, one with 2 alerts (badge) |
-| [heatmap](examples/heatmap/)     | 8082 | Singapore choropleth overlay — coloured region rectangles by severity |
+| [blink-dot](examples/blink-dot/) | 8080 | 5 green DC dots; 2 turn red — one with 1 alert, one with 2 alerts (badge) |
 
 ```bash
-# Blink-dot — 5 green DC dots on load; 2 turn red ~15s later
 cd examples/blink-dot && docker compose up -d
-# open http://localhost:8081
-
-# Heatmap — alerts fire; click "Heatmap" in toolbar to see coloured region rectangles
-cd examples/heatmap && docker compose up -d
-# open http://localhost:8082  →  click the "Heatmap" toolbar button
+# open http://localhost:8080
 ```
 
 See [`examples/README.md`](examples/README.md) for the full index.
@@ -496,7 +491,7 @@ Built-in effects (in `static/effects/`):
 | Effect          | What it does                                                | Example |
 |-----------------|-------------------------------------------------------------|---------|
 | `blink-critical`| CSS pulse animation on `severity=critical` markers          | [examples/blink-dot](examples/blink-dot/) |
-| `heatmap`       | Choropleth rectangle overlay coloured by severity (toggle via `MapWatch.toggleHeatmap()`) | [examples/heatmap](examples/heatmap/) |
+| `heatmap`       | Choropleth rectangle overlay coloured by severity; on by default, toggle via toolbar | — |
 | `geohash-grid`  | Draws the geohash bounding rectangle on marker hover        | — |
 
 ---
@@ -508,15 +503,24 @@ server:
   addr: ":8080"                  # Listen address
 
 prometheus:
-  url: http://prometheus:9090    # Prometheus base URL
+  url: http://prometheus:9090    # Prometheus base URL (server → Prometheus)
+  external_url: http://localhost:9090  # Browser → Prometheus (for expression links)
   timeout: 10s                   # Query timeout
 
 spread:
   radius: 0.01                   # Degrees offset for co-located markers
 
 locations:                       # datacenter/region → geohash lookup table
-  sg-dc-1: w21zd3               #   • Shown as green "healthy" dots on map load
-  us-east-1: dr5reg              #   • Alerts matching via `datacenter:` label aggregate onto the dot
+  sg-dc-1: w21zd3               #   • Shown as green breathing dots on map load
+  us-east-1: dr5reg              #   • Alerts matching `datacenter:` label aggregate onto the dot
+
+heatmap:                         # choropleth rectangle overlay (shown by default)
+  regions:
+    - name: "West SG"
+      bounds: [[1.3203, 103.7054], [1.3958, 103.7885]]   # [[lat_sw,lng_sw],[lat_ne,lng_ne]]
+    - name: "Central SG"
+      bounds: [[1.3134, 103.8002], [1.3533, 103.8764]]
+      color: "#4a9eff"           # optional: overrides severity colour
 
 query_templates:                 # alertname → PromQL templates
   HighCPU:
@@ -535,7 +539,9 @@ and `_` as separator (e.g. `MAPWATCH_SERVER_ADDR=":9000"`).
 ## Heatmap regions
 
 The heatmap overlay draws **choropleth rectangles** — solid filled regions coloured
-by severity, like a US state-level map. Toggle it with the **Heatmap** toolbar button.
+by severity. Regions are **always shown** when the Heatmap button is active:
+- **Active region** (has alerts) — coloured fill + count label at the top edge
+- **Empty region** (no alerts) — grey outline only
 
 | Severity | Rectangle colour |
 |----------|-----------------|
@@ -543,104 +549,63 @@ by severity, like a US state-level map. Toggle it with the **Heatmap** toolbar b
 | `warning`  | Amber `#e3b341` |
 | `info`     | Blue `#58a6ff` |
 
-Opacity scales with alert count (faint at 1 alert → solid at many).
-Hovering a rectangle shows the region name, worst severity, and alert count.
+Opacity scales with alert count (50% baseline → up to 85%).
+Hover a rectangle to see the region name, worst severity, and alert count.
 
-**Coexists with blink-dot** — the choropleth is a separate Leaflet layer
-and does not affect individual marker dots or DC baseline markers.
+**Coexists with blink-dot** — independent Leaflet layer, does not affect DC dots.
 
-### How to define regions
+### Defining regions
 
-Each region needs four fields:
+Each region needs only two required fields:
 
-| Field | Purpose |
-|-------|---------|
-| `name` | Human-readable label shown in the hover tooltip |
-| `center` | `[lat, lng]` — reserved for future label anchoring |
-| `bounds` | `[[lat_sw, lng_sw], [lat_ne, lng_ne]]` — rectangle corners drawn on the map |
-| `geohash_prefixes` | Geohash prefixes that assign markers to this region |
+| Field | Required | Purpose |
+|-------|----------|---------|
+| `name` | yes | Label shown in count badge and hover tooltip |
+| `bounds` | yes | `[[lat_sw, lng_sw], [lat_ne, lng_ne]]` — rectangle corners |
+| `color` | no | Hex override, e.g. `"#4a9eff"` — overrides severity colour |
 
-**Step 1 — Find your geohash prefixes.**
+A marker is assigned to a region when its **lat/lng falls inside the rectangle**.
 
-Go to [geohash.org](http://geohash.org), click a point in your target area, and
-read the generated hash. Truncate to the precision you need:
-
-| Prefix length | Approx cell size | Good for |
-|---------------|-----------------|----------|
-| 3 chars | ~156 km | Country / large state |
-| 4 chars | ~39 km | Metro area / province |
-| 5 chars | ~5 km | City district / planning zone |
-| 6 chars | ~0.6 km | Neighbourhood / campus |
-
-For Singapore (50 km × 27 km), 5-char prefixes give district-level resolution.
-
-**Step 2 — Set `bounds` to match the drawn rectangle.**
-
-`bounds` is `[[lat_sw, lng_sw], [lat_ne, lng_ne]]` — the southwest and northeast
-corners of the rectangle Leaflet draws. Make it cover the same area as your
-geohash prefixes. Regions can overlap; each marker is assigned to the first
-matching prefix (first match wins).
-
-**Step 3 — Cover your alert geohashes, not the whole map.**
-
-You only need regions where alerts actually land. Unmatched markers are silently
-skipped — they won't appear in the choropleth but still show as individual dots.
+**Tip — use the mouse coordinate display to find bounds.**
+Hover over the map and read the `lat, lng` shown in the bottom-left corner.
+Click two opposite corners to get your SW and NE coordinates.
 
 ### Singapore example
 
 ```yaml
 heatmap:
   regions:
-    - name: "North SG"
-      center: [1.432, 103.820]
-      bounds: [[1.38, 103.70], [1.48, 103.95]]   # Woodlands / Yishun
-      geohash_prefixes: ["w22", "w23"]
-
-    - name: "East SG"
-      center: [1.352, 103.940]
-      bounds: [[1.28, 103.88], [1.40, 104.09]]   # Tampines / Changi
-      geohash_prefixes: ["w21ze", "w21zs", "w21zk"]
-
     - name: "West SG"
-      center: [1.352, 103.700]
-      bounds: [[1.28, 103.62], [1.42, 103.78]]   # Jurong
-      geohash_prefixes: ["w21z8", "w21z2", "w21z0"]
+      bounds: [[1.3203, 103.7054], [1.3958, 103.7885]]
 
     - name: "Central SG"
-      center: [1.352, 103.820]
-      bounds: [[1.27, 103.78], [1.42, 103.90]]   # CBD / Orchard
-      geohash_prefixes: ["w21zd", "w21z9", "w21zb", "w21zc"]
+      bounds: [[1.3134, 103.8002], [1.3533, 103.8764]]
+
+    # Optional: override colour for a region
+    - name: "East SG"
+      bounds: [[1.28, 103.88], [1.40, 104.09]]
+      color: "#4a9eff"
 ```
 
 ### Using blink-dot and heatmap together
 
-`locations` (blink-dot) and `heatmap.regions` are completely independent — put
-both in the same `mapwatch.yaml` and both effects activate simultaneously:
+Both features are completely independent — put both in `mapwatch.yaml`:
 
 ```yaml
-# Blink-dot: named DC dots that turn red/yellow when alerts fire
-locations:
-  sg-dc-1: w21zd3   # Singapore CBD
-  sg-dc-2: w21z8k   # Singapore West
+locations:                          # DC baseline dots
+  sg-dc-1: w21zd3
+  sg-dc-2: w21z8k
 
-# Heatmap: choropleth zone overlay (toggle in toolbar)
-heatmap:
+heatmap:                            # choropleth rectangles
   regions:
-    - name: "Central SG"
-      center: [1.352, 103.820]
-      bounds: [[1.27, 103.78], [1.42, 103.90]]
-      geohash_prefixes: ["w21zd", "w21z9"]
     - name: "West SG"
-      center: [1.352, 103.700]
-      bounds: [[1.28, 103.62], [1.42, 103.78]]
-      geohash_prefixes: ["w21z8", "w21z2"]
+      bounds: [[1.3203, 103.7054], [1.3958, 103.7885]]
+    - name: "Central SG"
+      bounds: [[1.3134, 103.8002], [1.3533, 103.8764]]
 ```
 
 > **Blink-dot** answers *"which DC is on fire right now?"*
-> **Heatmap** answers *"which zone has the most load?"*
-
-See [`examples/blink-dot/`](examples/blink-dot/) for a blink-dot-only stack and
-[`examples/heatmap/`](examples/heatmap/) for a heatmap-only stack.
+> **Heatmap** answers *"which zone has the most alerts?"*
 
 ---
 
@@ -698,13 +663,15 @@ It drives everything — the Go binary embed, Docker image tag, and git tag.
 
 ```bash
 # 1. Bump the version
-echo "v0.2.4" > VERSION
+echo "v0.2.6" > VERSION
 
 # 2. Commit it
-git add . && git commit -m "chore: release v0.2.4"
+git add . && git commit -m "release v0.2.6"
 
 # 3. Tag + push — triggers the GitHub Actions release pipeline
 make release
+
+git push origin main
 ```
 
 `make release` reads `VERSION`, creates an annotated git tag, and pushes it.

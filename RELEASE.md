@@ -1,5 +1,35 @@
 # MapWatch Release Notes
 
+## v0.2.5
+
+**Heatmap UX overhaul + green dot animation** (breaking config change — see migration)
+
+- Heatmap shown by default; toggle off with the toolbar button (was opt-in)
+- Empty regions always visible as grey outlines — zones are clear even before alerts fire
+- Simplified region config: only `name` + `bounds` required (dropped `center`, `geohash_prefixes`)
+- Region matching now uses spatial containment (lat/lng inside bounds) instead of geohash prefix matching
+- Optional `color` per region overrides severity colour
+- Count label floats at top edge of each active rectangle: `"West SG · 2 alerts"`
+- Mouse coordinate overlay: hover map → `lat, lng` shown bottom-left (for tuning bounds)
+- Green DC baseline dots now breathe gently (3 s scale + opacity cycle)
+- Fix: DC aggregation timing race — markers arriving before `/api/config` returns now re-aggregate correctly
+- Removed `examples/heatmap/` — root `mapwatch.yaml` is the reference config
+
+**Migration** — replace `geohash_prefixes` + `center` with just `bounds`:
+```yaml
+# Before
+- name: "West SG"
+  center: [1.352, 103.700]
+  bounds: [[1.28, 103.62], [1.42, 103.78]]
+  geohash_prefixes: ["w21z8", "w21z2"]
+
+# After
+- name: "West SG"
+  bounds: [[1.3203, 103.7054], [1.3958, 103.7885]]
+```
+
+---
+
 ## v0.2.4
 
 **Heatmap: choropleth overlay** (breaking change — `bounds` field required)
