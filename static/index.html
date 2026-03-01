@@ -14,8 +14,6 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
-  <!-- Leaflet.heat -->
-  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; }
@@ -221,6 +219,14 @@
     }
     .mw-pulse { animation: mw-pulse 1.4s ease-out infinite; }
 
+    /* Gentle breathe for healthy (green) DC dots */
+    @keyframes mw-breathe {
+      0%   { transform: scale(1);    opacity: 1; }
+      50%  { transform: scale(1.25); opacity: 0.75; }
+      100% { transform: scale(1);    opacity: 1; }
+    }
+    .mw-breathe { animation: mw-breathe 3s ease-in-out infinite; }
+
     /* ── Geohash rect ── */
     .geohash-rect {
       stroke: #58a6ff;
@@ -265,6 +271,22 @@
     }
     .dc-sev-seg { border-radius: 3px; }
 
+    /* ── Mouse coordinate display ── */
+    #map-coords {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      z-index: 1000;
+      background: rgba(13,17,23,0.82);
+      color: #8b949e;
+      font-size: 11px;
+      font-family: monospace;
+      padding: 3px 7px;
+      border-radius: 3px;
+      pointer-events: none;
+      display: none;
+    }
+
     /* ── DC panel: alert list items ── */
     .dc-alert-item {
       display: flex;
@@ -297,18 +319,16 @@
     <div class="tb-sep"></div>
     <div id="ws-status" title="WebSocket connection"></div>
     <div class="tb-sep"></div>
-    <button class="tb-btn active" id="btn-cluster"   onclick="MapWatch.toggleClusterMode()">Cluster</button>
-    <button class="tb-btn"        id="btn-spread"    onclick="MapWatch.toggleSpreadMode()">Spread</button>
-    <div class="tb-sep"></div>
-    <button class="tb-btn active" id="btn-borders"   onclick="MapWatch.toggleBorders()">Borders</button>
-    <div class="tb-sep"></div>
     <button class="tb-btn active" id="btn-dark"      onclick="MapWatch.setTheme('dark')">Dark</button>
     <button class="tb-btn"        id="btn-light"     onclick="MapWatch.setTheme('light')">Light</button>
     <button class="tb-btn"        id="btn-satellite" onclick="MapWatch.setTheme('satellite')">Satellite</button>
     <div class="tb-sep"></div>
-    <button class="tb-btn" id="btn-heatmap"
+    <button class="tb-btn active" id="btn-heatmap"
             onclick="if(MapWatch.toggleHeatmap){MapWatch.toggleHeatmap();this.classList.toggle('active')}">Heatmap</button>
   </div>
+
+  <!-- Mouse coordinate display -->
+  <div id="map-coords"></div>
 
   <!-- Side panel -->
   <div id="panel">

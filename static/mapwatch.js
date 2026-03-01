@@ -37,18 +37,14 @@
   // id → { leafletMarker (null for DC-owned alerts), data }
   let markerMap    = {};
   let geoBoundsMap = {};  // id → L.Rectangle (hover overlay)
-  let clusterGroup;       // L.markerClusterGroup (cluster mode)
-  let spreadLayer;        // L.LayerGroup (spread mode)
-  let clusterMode  = true;
-  let bordersLayer = null;
-  let bordersVisible = true;
+  let clusterGroup;       // L.markerClusterGroup
   let activeMarkerId = null;
   let activeDCName   = null;  // currently open DC panel
   let ws;
   let wsReconnectTimer;
   let effects = {};
-  // Prometheus external URL fetched from /api/config on startup.
-  let prometheusURL = 'http://localhost:9090';
+  // Heatmap region definitions fetched from /api/config; read by heatmap.js effect.
+  let heatmapRegions = [];
 
   // DC baseline markers: name → { leafletMarker, alerts: {alertId→data}, lat, lng }
   let dcMarkers = {};
@@ -78,14 +74,22 @@
     }).addTo(map);
 
     clusterGroup = L.markerClusterGroup({ chunkedLoading: true, zoomToBoundsOnClick: false });
-    spreadLayer  = L.layerGroup();
-
     clusterGroup.addTo(map);
 
     // Keyboard shortcut: Esc closes panel.
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') MapWatch.closePanel();
     });
+
+    // Mouse coordinate display (bottom-left corner).
+    const coordEl = document.getElementById('map-coords');
+    if (coordEl) {
+      map.on('mousemove', (e) => {
+        coordEl.style.display = 'block';
+        coordEl.textContent = e.latlng.lat.toFixed(4) + ', ' + e.latlng.lng.toFixed(4);
+      });
+      map.on('mouseout', () => { coordEl.style.display = 'none'; });
+    }
 
     // Fetch runtime config (Prometheus external URL, locations, etc.) from server.
     fetchConfig();
@@ -98,8 +102,14 @@
     fetch('/api/config')
       .then(r => r.json())
       .then(cfg => {
-        if (cfg && cfg.prometheusUrl) prometheusURL = cfg.prometheusUrl;
         if (cfg && cfg.locations && cfg.locations.length) initDCMarkers(cfg.locations);
+        if (cfg && Array.isArray(cfg.heatmapRegions)) {
+          heatmapRegions = cfg.heatmapRegions;
+          window.MapWatch.heatmapRegions = heatmapRegions;
+          // Markers may have already arrived via WS before config loaded.
+          // Re-run effects so the heatmap can draw with the now-known regions.
+          runEffects({ type: 'config.loaded' });
+        }
       })
       .catch(() => { /* use defaults */ });
   }
@@ -123,6 +133,21 @@
       dcMarkers[loc.name] = { leafletMarker: lm, alerts: {}, lat: loc.lat, lng: loc.lng };
       lm.addTo(map);   // DC markers live directly on the map, not in cluster/spread
     }
+
+    // Alerts may have arrived via WS before config loaded (dcMarkers was empty).
+    // Re-aggregate any individual markers that belong to a known DC.
+    for (const [id, entry] of Object.entries(markerMap)) {
+      const dcName = getDCForAlert(entry.data);
+      if (!dcName) continue;
+      // Remove the stray individual Leaflet marker from the cluster layer.
+      if (entry.leafletMarker) {
+        clusterGroup.removeLayer(entry.leafletMarker);
+        if (geoBoundsMap[id]) { map.removeLayer(geoBoundsMap[id]); delete geoBoundsMap[id]; }
+        entry.leafletMarker = null;
+      }
+      dcMarkers[dcName].alerts[id] = entry.data;
+      updateDCMarker(dcName);
+    }
   }
 
   /**
@@ -134,7 +159,7 @@
     let color, pulse, dotSize;
     if (alertCount === 0) {
       color   = '#3fb950';  // green — healthy
-      pulse   = '';
+      pulse   = 'mw-breathe';
       dotSize = 14;
     } else if (worstSev === 'critical') {
       color   = SEVERITY_COLORS.critical;
@@ -380,7 +405,6 @@
 
     if (leafletMarker) {
       clusterGroup.removeLayer(leafletMarker);
-      spreadLayer.removeLayer(leafletMarker);
     }
     delete markerMap[id];
 
@@ -392,11 +416,7 @@
   }
 
   function addToActiveLayer(lm) {
-    if (clusterMode) {
-      clusterGroup.addLayer(lm);
-    } else {
-      spreadLayer.addLayer(lm);
-    }
+    clusterGroup.addLayer(lm);
   }
 
   function severityColor(sev) {
@@ -417,62 +437,15 @@
     }
   }
 
-  // ── Cluster / Spread toggle ───────────────────────────────────────────────────
-
-  function toggleClusterMode() {
-    if (clusterMode) return;
-    clusterMode = true;
-
-    spreadLayer.clearLayers();
-    map.removeLayer(spreadLayer);
-    for (const { leafletMarker } of Object.values(markerMap)) {
-      if (leafletMarker) clusterGroup.addLayer(leafletMarker);
-    }
-    clusterGroup.addTo(map);
-
-    document.getElementById('btn-cluster').classList.add('active');
-    document.getElementById('btn-spread').classList.remove('active');
-  }
-
-  function toggleSpreadMode() {
-    if (!clusterMode) return;
-    clusterMode = false;
-
-    clusterGroup.clearLayers();
-    map.removeLayer(clusterGroup);
-    for (const { leafletMarker } of Object.values(markerMap)) {
-      if (leafletMarker) spreadLayer.addLayer(leafletMarker);
-    }
-    spreadLayer.addTo(map);
-
-    document.getElementById('btn-spread').classList.add('active');
-    document.getElementById('btn-cluster').classList.remove('active');
-  }
-
   // ── Theme switcher ────────────────────────────────────────────────────────────
 
   function setTheme(name) {
     const t = THEMES[name];
     if (!t) return;
-    currentTheme = name;
     tileLayer.setUrl(t.url);
     ['dark', 'light', 'satellite'].forEach((n) => {
       document.getElementById('btn-' + n).classList.toggle('active', n === name);
     });
-  }
-
-  // ── Borders toggle ────────────────────────────────────────────────────────────
-
-  function toggleBorders() {
-    bordersVisible = !bordersVisible;
-    if (bordersLayer) {
-      if (bordersVisible) {
-        bordersLayer.addTo(map);
-      } else {
-        map.removeLayer(bordersLayer);
-      }
-    }
-    document.getElementById('btn-borders').classList.toggle('active', bordersVisible);
   }
 
   // ── Side panel ────────────────────────────────────────────────────────────────
@@ -673,13 +646,13 @@
 
   window.MapWatch = {
     registerEffect,
-    toggleClusterMode,
-    toggleSpreadMode,
     setTheme,
-    toggleBorders,
     openPanel,
     openDCPanel,
     closePanel,
+    // Heatmap region definitions — populated from /api/config by fetchConfig();
+    // read by heatmap.js on every effect invocation.
+    heatmapRegions: [],
     // Exposed for static export mode (pre-load markers without WS)
     loadStaticMarkers(markers) {
       for (const m of markers) upsertMarker(m, true);

@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
+	"github.com/teochenglim/mapwatch/internal/config"
 	"github.com/teochenglim/mapwatch/internal/geo"
 	"github.com/teochenglim/mapwatch/internal/marker"
 	"github.com/teochenglim/mapwatch/internal/transformer"
@@ -23,7 +24,8 @@ type Handlers struct {
 	amTrans         *transformer.AlertmanagerTransformer
 	promProxy       *transformer.PromProxy
 	promExternalURL string
-	locations       map[string]string // name → geohash, for /api/config baseline dots
+	locations       map[string]string    // name → geohash, for /api/config baseline dots
+	heatmapRegions  []config.HeatmapRegion // optional region aggregation zones
 	upgrader        *websocket.Upgrader
 }
 
@@ -222,9 +224,28 @@ func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {
 			locs = append(locs, locItem{Name: name, Lat: center.Lat, Lng: center.Lng})
 		}
 	}
+
+	type regionItem struct {
+		Name   string        `json:"name"`
+		Bounds [2][2]float64 `json:"bounds"`
+		Color  string        `json:"color,omitempty"`
+	}
+	regions := make([]regionItem, 0, len(h.heatmapRegions))
+	for _, hr := range h.heatmapRegions {
+		regions = append(regions, regionItem{
+			Name:   hr.Name,
+			Bounds: hr.Bounds,
+			Color:  hr.Color,
+		})
+	}
+
+	log.Printf("[config] GET /api/config: locations=%d heatmapRegions=%d prometheusUrl=%s",
+		len(locs), len(regions), h.promExternalURL)
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"prometheusUrl": h.promExternalURL,
-		"locations":     locs,
+		"prometheusUrl":  h.promExternalURL,
+		"locations":      locs,
+		"heatmapRegions": regions,
 	})
 }
 

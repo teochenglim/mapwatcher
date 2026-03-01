@@ -33,6 +33,7 @@ func New(cfg *config.Config, staticFS http.FileSystem) *http.Server {
 		promProxy:       promProxy,
 		promExternalURL: cfg.Prometheus.ExternalURL,
 		locations:       cfg.Locations,
+		heatmapRegions:  cfg.Heatmap.Regions,
 		upgrader:        upgrader,
 	}
 

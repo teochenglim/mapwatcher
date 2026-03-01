@@ -8,7 +8,7 @@ one with two alerts (count badge). The other three DCs stay green.
 
 ```
 Prometheus ──(vector(1) always fires)──► Alertmanager ──webhook──► MapWatch ──WebSocket──► Browser
-                                                          :9094       :8081                  (map)
+                                                          :9093       :8080                  (map)
 ```
 
 ---
@@ -17,16 +17,21 @@ Prometheus ──(vector(1) always fires)──► Alertmanager ──webhook─
 
 ```bash
 cd examples/blink-dot
+
+# Pull published image (end-user):
 docker compose up -d
+
+# Build from local source (developer):
+docker compose up --build
 ```
 
 | Service      | URL                     |
 |--------------|-------------------------|
-| MapWatch     | http://localhost:8081   |
-| Prometheus   | http://localhost:9091   |
-| Alertmanager | http://localhost:9094   |
+| MapWatch     | http://localhost:8080   |
+| Prometheus   | http://localhost:9090   |
+| Alertmanager | http://localhost:9093   |
 
-Open **http://localhost:8081** and watch the map unfold in two stages:
+Open **http://localhost:8080** and watch the map unfold in two stages:
 
 **Stage 1 — on page load (immediate):**
 
@@ -105,7 +110,7 @@ The CSS pulse animation on the DC dot:
 Add a third alert to sg-dc-2 — the badge will update to ③:
 
 ```bash
-curl -s -XPOST http://localhost:8081/api/markers \
+curl -s -XPOST http://localhost:8080/api/markers \
   -H 'Content-Type: application/json' \
   -d '{
     "id":      "manual-west-3",
@@ -119,7 +124,7 @@ curl -s -XPOST http://localhost:8081/api/markers \
 Add a warning to a healthy DC (sg-dc-3) — the dot turns yellow:
 
 ```bash
-curl -s -XPOST http://localhost:8081/api/markers \
+curl -s -XPOST http://localhost:8080/api/markers \
   -H 'Content-Type: application/json' \
   -d '{
     "id":      "manual-north-1",
@@ -133,8 +138,8 @@ curl -s -XPOST http://localhost:8081/api/markers \
 Remove them:
 
 ```bash
-curl -s -XDELETE http://localhost:8081/api/markers/manual-west-3
-curl -s -XDELETE http://localhost:8081/api/markers/manual-north-1
+curl -s -XDELETE http://localhost:8080/api/markers/manual-west-3
+curl -s -XDELETE http://localhost:8080/api/markers/manual-north-1
 ```
 
 ---

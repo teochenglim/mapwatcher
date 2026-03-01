@@ -26,8 +26,7 @@ point Alertmanager at MapWatch, and your infrastructure lights up on the map in 
 - **Live updates via WebSocket** — dots appear, pulse, and disappear as alerts fire and resolve
 - **Critical alerts blink** — `severity: critical` triggers a CSS pulse animation automatically
 - **Click-to-Prometheus** — click any dot to open the matching PromQL query in Prometheus
-- **Cluster / Spread mode** — groups nearby alerts or fans them out so nothing overlaps
-- **Heatmap overlay** — density heat layer via Leaflet.heat (toggle in toolbar)
+- **Choropleth heatmap** — pre-defined geographic regions coloured by severity (like a US state map); toggle in toolbar
 - **Single binary, zero deps** — static assets embedded via `go:embed`; runs anywhere Go runs
 
 ---
@@ -40,14 +39,14 @@ Each example lives in [`examples/`](examples/) and is fully self-contained.
 | Example | Port | What it shows |
 |---------|------|---------------|
 | [blink-dot](examples/blink-dot/) | 8081 | 5 green DC dots; 2 turn red — one with 1 alert, one with 2 alerts (badge) |
-| [heatmap](examples/heatmap/)     | 8082 | 4 green DC dots + heat density overlay with Singapore CBD hotspot |
+| [heatmap](examples/heatmap/)     | 8082 | Singapore choropleth overlay — coloured region rectangles by severity |
 
 ```bash
 # Blink-dot — 5 green DC dots on load; 2 turn red ~15s later
 cd examples/blink-dot && docker compose up -d
 # open http://localhost:8081
 
-# Heatmap — 4 green DC dots + 7 alerts; click "Heatmap" in toolbar
+# Heatmap — alerts fire; click "Heatmap" in toolbar to see coloured region rectangles
 cd examples/heatmap && docker compose up -d
 # open http://localhost:8082  →  click the "Heatmap" toolbar button
 ```
@@ -65,8 +64,10 @@ The repo ships with always-firing demo alerts so you can see blinking markers im
 ```bash
 git clone https://github.com/teochenglim/mapwatch.git
 cd mapwatch
-docker compose up -d
+docker compose up --build
 ```
+
+> `--build` rebuilds the MapWatch image from local source. Use `docker compose up -d` (no `--build`) if you just want to pull the published image.
 
 This starts three services:
 
@@ -218,6 +219,10 @@ EOF
 ### 3. Start the stack
 
 ```bash
+# Build from local source (development):
+docker compose up --build
+
+# Or pull the published image (quickstart, no Go needed):
 docker compose up -d
 ```
 
@@ -242,10 +247,10 @@ Open **http://localhost:8080** in your browser.
 ### 1. Install
 
 ```bash
-# From source
+# From source (binary lands in bin/mapwatch)
 git clone https://github.com/teochenglim/mapwatch.git
 cd mapwatch
-go build -o mapwatch .
+make build
 
 # Or with go install
 go install github.com/teochenglim/mapwatch@latest
@@ -254,14 +259,14 @@ go install github.com/teochenglim/mapwatch@latest
 ### 2. Run the server
 
 ```bash
-./mapwatch serve
+./bin/mapwatch serve
 # → listening on :8080
 ```
 
 Pass a custom config:
 
 ```bash
-./mapwatch serve --config ./mapwatch.yaml
+./bin/mapwatch serve --config ./mapwatch.yaml
 ```
 
 ### 3. Override settings with environment variables
@@ -491,7 +496,7 @@ Built-in effects (in `static/effects/`):
 | Effect          | What it does                                                | Example |
 |-----------------|-------------------------------------------------------------|---------|
 | `blink-critical`| CSS pulse animation on `severity=critical` markers          | [examples/blink-dot](examples/blink-dot/) |
-| `heatmap`       | Leaflet.heat density overlay (toggle via `MapWatch.toggleHeatmap()`) | [examples/heatmap](examples/heatmap/) |
+| `heatmap`       | Choropleth rectangle overlay coloured by severity (toggle via `MapWatch.toggleHeatmap()`) | [examples/heatmap](examples/heatmap/) |
 | `geohash-grid`  | Draws the geohash bounding rectangle on marker hover        | — |
 
 ---
@@ -524,6 +529,118 @@ query_templates:                 # alertname → PromQL templates
 
 All keys can be overridden with environment variables using the `MAPWATCH_` prefix
 and `_` as separator (e.g. `MAPWATCH_SERVER_ADDR=":9000"`).
+
+---
+
+## Heatmap regions
+
+The heatmap overlay draws **choropleth rectangles** — solid filled regions coloured
+by severity, like a US state-level map. Toggle it with the **Heatmap** toolbar button.
+
+| Severity | Rectangle colour |
+|----------|-----------------|
+| `critical` | Red `#f85149` |
+| `warning`  | Amber `#e3b341` |
+| `info`     | Blue `#58a6ff` |
+
+Opacity scales with alert count (faint at 1 alert → solid at many).
+Hovering a rectangle shows the region name, worst severity, and alert count.
+
+**Coexists with blink-dot** — the choropleth is a separate Leaflet layer
+and does not affect individual marker dots or DC baseline markers.
+
+### How to define regions
+
+Each region needs four fields:
+
+| Field | Purpose |
+|-------|---------|
+| `name` | Human-readable label shown in the hover tooltip |
+| `center` | `[lat, lng]` — reserved for future label anchoring |
+| `bounds` | `[[lat_sw, lng_sw], [lat_ne, lng_ne]]` — rectangle corners drawn on the map |
+| `geohash_prefixes` | Geohash prefixes that assign markers to this region |
+
+**Step 1 — Find your geohash prefixes.**
+
+Go to [geohash.org](http://geohash.org), click a point in your target area, and
+read the generated hash. Truncate to the precision you need:
+
+| Prefix length | Approx cell size | Good for |
+|---------------|-----------------|----------|
+| 3 chars | ~156 km | Country / large state |
+| 4 chars | ~39 km | Metro area / province |
+| 5 chars | ~5 km | City district / planning zone |
+| 6 chars | ~0.6 km | Neighbourhood / campus |
+
+For Singapore (50 km × 27 km), 5-char prefixes give district-level resolution.
+
+**Step 2 — Set `bounds` to match the drawn rectangle.**
+
+`bounds` is `[[lat_sw, lng_sw], [lat_ne, lng_ne]]` — the southwest and northeast
+corners of the rectangle Leaflet draws. Make it cover the same area as your
+geohash prefixes. Regions can overlap; each marker is assigned to the first
+matching prefix (first match wins).
+
+**Step 3 — Cover your alert geohashes, not the whole map.**
+
+You only need regions where alerts actually land. Unmatched markers are silently
+skipped — they won't appear in the choropleth but still show as individual dots.
+
+### Singapore example
+
+```yaml
+heatmap:
+  regions:
+    - name: "North SG"
+      center: [1.432, 103.820]
+      bounds: [[1.38, 103.70], [1.48, 103.95]]   # Woodlands / Yishun
+      geohash_prefixes: ["w22", "w23"]
+
+    - name: "East SG"
+      center: [1.352, 103.940]
+      bounds: [[1.28, 103.88], [1.40, 104.09]]   # Tampines / Changi
+      geohash_prefixes: ["w21ze", "w21zs", "w21zk"]
+
+    - name: "West SG"
+      center: [1.352, 103.700]
+      bounds: [[1.28, 103.62], [1.42, 103.78]]   # Jurong
+      geohash_prefixes: ["w21z8", "w21z2", "w21z0"]
+
+    - name: "Central SG"
+      center: [1.352, 103.820]
+      bounds: [[1.27, 103.78], [1.42, 103.90]]   # CBD / Orchard
+      geohash_prefixes: ["w21zd", "w21z9", "w21zb", "w21zc"]
+```
+
+### Using blink-dot and heatmap together
+
+`locations` (blink-dot) and `heatmap.regions` are completely independent — put
+both in the same `mapwatch.yaml` and both effects activate simultaneously:
+
+```yaml
+# Blink-dot: named DC dots that turn red/yellow when alerts fire
+locations:
+  sg-dc-1: w21zd3   # Singapore CBD
+  sg-dc-2: w21z8k   # Singapore West
+
+# Heatmap: choropleth zone overlay (toggle in toolbar)
+heatmap:
+  regions:
+    - name: "Central SG"
+      center: [1.352, 103.820]
+      bounds: [[1.27, 103.78], [1.42, 103.90]]
+      geohash_prefixes: ["w21zd", "w21z9"]
+    - name: "West SG"
+      center: [1.352, 103.700]
+      bounds: [[1.28, 103.62], [1.42, 103.78]]
+      geohash_prefixes: ["w21z8", "w21z2"]
+```
+
+> **Blink-dot** answers *"which DC is on fire right now?"*
+> **Heatmap** answers *"which zone has the most load?"*
+
+See [`examples/blink-dot/`](examples/blink-dot/) for a blink-dot-only stack and
+[`examples/heatmap/`](examples/heatmap/) for a heatmap-only stack.
 
 ---
 
@@ -581,10 +698,10 @@ It drives everything — the Go binary embed, Docker image tag, and git tag.
 
 ```bash
 # 1. Bump the version
-echo "v0.2.3" > VERSION
+echo "v0.2.4" > VERSION
 
 # 2. Commit it
-git add . && git commit -m "chore: release v0.2.3"
+git add . && git commit -m "chore: release v0.2.4"
 
 # 3. Tag + push — triggers the GitHub Actions release pipeline
 make release

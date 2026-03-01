@@ -74,12 +74,17 @@ func TestAPIGetConfig(t *testing.T) {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
 	var cfg struct {
-		PrometheusURL string `json:"prometheusUrl"`
-		Locations     []struct {
+		PrometheusURL  string `json:"prometheusUrl"`
+		Locations      []struct {
 			Name string  `json:"name"`
 			Lat  float64 `json:"lat"`
 			Lng  float64 `json:"lng"`
 		} `json:"locations"`
+		HeatmapRegions []struct {
+			Name            string     `json:"name"`
+			Center          [2]float64 `json:"center"`
+			GeohashPrefixes []string   `json:"geohash_prefixes"`
+		} `json:"heatmapRegions"`
 	}
 	decode(t, resp, &cfg)
 	if cfg.PrometheusURL != "http://localhost:9090" {
@@ -87,6 +92,10 @@ func TestAPIGetConfig(t *testing.T) {
 	}
 	if len(cfg.Locations) != 1 {
 		t.Errorf("expected 1 location, got %d", len(cfg.Locations))
+	}
+	// No heatmap regions in the test config — field must be present but empty.
+	if cfg.HeatmapRegions == nil {
+		t.Error("heatmapRegions field missing from /api/config response")
 	}
 }
 

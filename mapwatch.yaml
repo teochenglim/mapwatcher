@@ -9,14 +9,31 @@ prometheus:
 spread:
   radius: 0.01
 
-# Five Singapore datacenters — shown as green baseline dots on map load.
-# sg-dc-1 fires 1 alert; sg-dc-2 fires 2 alerts; the rest stay healthy (green).
+# ── Blink-dot: DC baseline markers ───────────────────────────────────────────
+# Each entry renders as a green "healthy" dot on map load.
+# When an alert fires with a matching `datacenter:` label, the dot turns
+# red/yellow and blinks (critical) or dims (warning/info).
+# sg-dc-1 fires 1 alert; sg-dc-2 fires 2 alerts; the rest stay green.
 locations:
   sg-dc-1: w21zd3   # Singapore CBD
   sg-dc-2: w21z8k   # Singapore West
   sg-dc-3: w21zb    # Singapore North
   sg-dc-4: w21ze    # Singapore East
   sg-dc-5: w21z9    # Singapore Central
+
+# ── Heatmap: choropleth region overlay ───────────────────────────────────────
+# Each region is drawn as a filled rectangle coloured by worst alert severity.
+# Any marker whose lat/lng falls inside the bounds is counted in that region.
+# Shown by default; toggle off with the Heatmap button in the toolbar.
+#
+# Required: name, bounds: [[lat_sw, lng_sw], [lat_ne, lng_ne]]
+# Optional: color: "#hex"  — overrides severity colour (red/amber/blue)
+heatmap:
+  regions:
+    - name: "West SG"
+      bounds: [[1.3203, 103.7054], [1.3958, 103.7885]]
+    - name: "Central SG"
+      bounds: [[1.3134, 103.8002], [1.3533, 103.8764]]
 
 # PromQL templates shown in the side panel when clicking a marker.
 query_templates:

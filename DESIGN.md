@@ -508,5 +508,180 @@ mapwatch/
     geo labeling guide (geohash preferred), query_template reference, 
     effect plugin authoring guide
 
-After implementation, summarize what is fully implemented, what is stubbed 
+After implementation, summarize what is fully implemented, what is stubbed
 or placeholder, and recommend the next 3 iteration priorities.
+
+---
+
+## Heatmap v2 — Pre-defined Region Aggregation
+
+### Motivation
+
+The current heatmap (`heatmap.js`) renders each alert as an independent
+lat/lng point with a small intensity blob. For dense deployments, this
+produces a noisy scatter of blobs rather than meaningful spatial pattern.
+
+The desired behaviour mirrors a US state-level heatmap:
+- The map is divided into named regions (states / planning zones)
+- All alerts whose geohash falls inside a region **aggregate into one
+  heatmap point** placed at the region's defined centroid
+- The point's weight reflects the combined severity of all alerts in that
+  region — not just count
+
+### Config schema
+
+Regions are defined in `mapwatch.yaml` under a new `heatmap.regions` key:
+
+```yaml
+heatmap:
+  regions:
+    - name: "North"
+      center: [1.432, 103.820]       # lat, lng — where the heatmap blob is placed
+      geohash_prefixes: ["w22", "w23"]
+    - name: "East"
+      center: [1.352, 103.940]
+      geohash_prefixes: ["w21z", "w21x"]
+    - name: "West"
+      center: [1.352, 103.700]
+      geohash_prefixes: ["w21y", "w21w"]
+    - name: "South"
+      center: [1.275, 103.820]
+      geohash_prefixes: ["w21t", "w21s", "w21q"]
+    - name: "Central"
+      center: [1.352, 103.820]
+      geohash_prefixes: ["w21z8", "w21z9", "w21zd"]
+```
+
+Rules:
+- `geohash_prefixes` is an ordered list; matching is `marker.geohash.startsWith(prefix)`.
+- Prefixes are checked in list order — first match wins.
+- A shorter prefix subsumes all longer ones (e.g. `"w22"` matches `"w221"`, `"w22z"`).
+- Regions must not have overlapping prefixes; the config author is responsible for
+  ensuring disjoint coverage.
+- A marker whose geohash matches no region falls back to **point mode** (rendered
+  individually, same as current behaviour).
+- If `heatmap.regions` is empty or absent, the heatmap runs in point mode only.
+
+### Region-match function (client-side JS)
+
+```js
+// Returns the first matching region or null.
+function geohashToRegion(geohash, regions) {
+  if (!geohash) return null;
+  for (const region of regions) {
+    for (const prefix of region.geohash_prefixes) {
+      if (geohash.startsWith(prefix)) return region;
+    }
+  }
+  return null;
+}
+```
+
+This is the single function that decides aggregation. It runs for every
+marker on every heatmap refresh — O(markers × regions × avg_prefixes),
+which is negligible at typical alert volumes.
+
+### Aggregation algorithm
+
+On every `marker.add / marker.update / marker.remove` event:
+
+```
+regionBuckets = {}   // region.name → accumulated weight
+
+for each marker in markerMap:
+  intensity = severityIntensity(marker.severity)  // critical=1.0, warning=0.6, info=0.3
+  region = geohashToRegion(marker.geohash, configRegions)
+
+  if region:
+    regionBuckets[region.name] += intensity
+  else:
+    pointFallback.push([marker.lat, marker.lng, intensity])   // individual point
+
+// Build heatmap input
+points = []
+for each (name, weight) in regionBuckets:
+  region = regionsByName[name]
+  points.push([region.center[0], region.center[1], weight])
+
+points.push(...pointFallback)
+
+heatLayer.setLatLngs(points)
+```
+
+Weight is **cumulative severity**, not raw count. A region with one
+critical alert (weight 1.0) shows hotter than one with five info alerts
+(weight 1.5), because a single critical incident is operationally worse.
+
+### Leaflet.heat parameter tuning for region mode
+
+| Parameter | Point mode (current) | Region mode (new) |
+|-----------|---------------------|-------------------|
+| `radius`  | 25                  | 60                |
+| `blur`    | 15                  | 40                |
+| `maxZoom` | 10                  | 17 (no cap)       |
+
+Larger radius and blur cause each region centroid to visually fill the
+region's geographic extent and blend into neighbours, producing the smooth
+choropleth-like gradient the user expects. When zoomed in, the region blob
+still sits at the centroid — this is intentional (the heatmap is a
+high-level summary view, not a precise locator).
+
+### API: expose regions to frontend
+
+`GET /api/config` already returns `locations`. Extend it to also return
+`heatmapRegions` (empty array if unconfigured):
+
+```json
+{
+  "prometheusUrl": "http://localhost:9090",
+  "locations": [{ "name": "sg-dc-1", "lat": 1.35, "lng": 103.82 }],
+  "heatmapRegions": [
+    { "name": "North",   "center": [1.432, 103.820], "geohash_prefixes": ["w22", "w23"] },
+    { "name": "East",    "center": [1.352, 103.940], "geohash_prefixes": ["w21z", "w21x"] },
+    { "name": "West",    "center": [1.352, 103.700], "geohash_prefixes": ["w21y", "w21w"] },
+    { "name": "South",   "center": [1.275, 103.820], "geohash_prefixes": ["w21t", "w21s", "w21q"] },
+    { "name": "Central", "center": [1.352, 103.820], "geohash_prefixes": ["w21z8", "w21z9", "w21zd"] }
+  ]
+}
+```
+
+`heatmap.js` fetches this once on load (or reads from `MapWatch.config`
+if the main JS already fetched it), then uses the regions array on every
+refresh.
+
+### Go config struct changes
+
+```go
+type HeatmapRegion struct {
+    Name            string     `yaml:"name"`
+    Center          [2]float64 `yaml:"center"`   // [lat, lng]
+    GeohashPrefixes []string   `yaml:"geohash_prefixes"`
+}
+
+type HeatmapConfig struct {
+    Regions []HeatmapRegion `yaml:"regions"`
+}
+
+type Config struct {
+    // existing fields ...
+    Heatmap HeatmapConfig `yaml:"heatmap"`
+}
+```
+
+`GetConfig` handler serialises `cfg.Heatmap.Regions` → `heatmapRegions`
+in the JSON response.
+
+### Implementation plan
+
+1. Add `HeatmapConfig` / `HeatmapRegion` to `internal/config/config.go`
+2. Extend `Handlers.GetConfig` to include `heatmapRegions` in response
+3. Update `TestAPIGetConfig` to assert `heatmapRegions` field is present
+4. Rewrite `static/effects/heatmap.js`:
+   - Fetch regions from `MapWatch.config.heatmapRegions` (populated at
+     page load alongside `prometheusUrl`)
+   - Implement `geohashToRegion()` and the bucket aggregation loop
+   - Switch Leaflet.heat params based on whether regions are configured
+   - Keep `MapWatch.toggleHeatmap()` interface unchanged (toolbar button
+     still works the same way)
+5. Update `mapwatch.yaml` example and deploy configs with SG region table
+6. Document the `heatmap.regions` config key in README

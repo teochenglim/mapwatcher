@@ -10,11 +10,27 @@ import (
 
 // Config holds the full application configuration.
 type Config struct {
-	Server     ServerConfig              `mapstructure:"server"`
-	Prometheus PrometheusConfig          `mapstructure:"prometheus"`
-	Locations  map[string]string         `mapstructure:"locations"`
+	Server         ServerConfig               `mapstructure:"server"`
+	Prometheus     PrometheusConfig           `mapstructure:"prometheus"`
+	Locations      map[string]string          `mapstructure:"locations"`
 	QueryTemplates map[string][]QueryTemplate `mapstructure:"query_templates"`
-	Spread     SpreadConfig              `mapstructure:"spread"`
+	Spread         SpreadConfig               `mapstructure:"spread"`
+	Heatmap        HeatmapConfig              `mapstructure:"heatmap"`
+}
+
+// HeatmapRegion defines a named spatial zone for choropleth overlay.
+// Markers whose lat/lng falls inside Bounds are aggregated into this region.
+// Bounds: [[lat_sw, lng_sw], [lat_ne, lng_ne]] — the rectangle drawn on the map.
+// Color (optional) overrides the severity-based fill colour, e.g. "#4a9eff".
+type HeatmapRegion struct {
+	Name   string        `mapstructure:"name"`
+	Bounds [2][2]float64 `mapstructure:"bounds"` // [[lat_sw,lng_sw],[lat_ne,lng_ne]]
+	Color  string        `mapstructure:"color"`  // optional custom fill colour
+}
+
+// HeatmapConfig holds optional region definitions for heatmap aggregation.
+type HeatmapConfig struct {
+	Regions []HeatmapRegion `mapstructure:"regions"`
 }
 
 type ServerConfig struct {

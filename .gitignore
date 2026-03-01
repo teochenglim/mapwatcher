@@ -1,5 +1,6 @@
 bin/
 dist/
 data/
+mapwatch
 *.geojson
 mapwatch-export.html
