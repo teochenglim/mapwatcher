@@ -1,0 +1,25 @@
+server:
+  addr: ":8080"
+
+prometheus:
+  url: http://prometheus:9090
+  timeout: 10s
+
+# Datacenter/region label → geohash lookup.
+locations:
+  sg-dc-1:         w21zd3   # Singapore CBD
+  sg-dc-2:         w21z8k   # Singapore West
+  ap-northeast-1:  xn774c   # Tokyo (approximate)
+  ap-southeast-2:  r3gx2u   # Sydney (approximate)
+  us-east-1:       dr5reg   # New York
+  us-west-2:       9q8yy    # Los Angeles
+  eu-west-1:       gc6uf    # Dublin
+  eu-central-1:    u4pruyd  # Berlin
+
+# PromQL templates shown in the side panel when clicking a marker.
+query_templates:
+  default:
+    - label: "CPU Usage %"
+      query: 'rate(node_cpu_seconds_total{mode="user",instance="{{.instance}}"}[5m]) * 100'
+    - label: "Memory Used %"
+      query: '100 - (node_memory_MemAvailable_bytes{instance="{{.instance}}"} / node_memory_MemTotal_bytes * 100)'

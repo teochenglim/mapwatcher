@@ -1,0 +1,15 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ["alertname"]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 2m   # short for demo; use 12h+ in production
+  receiver: mapwatch
+
+receivers:
+  - name: mapwatch
+    webhook_configs:
+      - url: http://mapwatch:8080/api/alerts
+        send_resolved: true

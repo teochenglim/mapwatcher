@@ -27,6 +27,30 @@ point Alertmanager at MapWatch, and your infrastructure lights up on the map in 
 
 ---
 
+## Examples
+
+Ready-to-run Docker Compose stacks that highlight specific features.
+Each example lives in [`examples/`](examples/) and is fully self-contained.
+
+| Example | Port | What it shows |
+|---------|------|---------------|
+| [blink-dot](examples/blink-dot/) | 8081 | CSS pulse animation on `severity=critical` markers |
+| [heatmap](examples/heatmap/)     | 8082 | Leaflet.heat density overlay across 13 global alerts |
+
+```bash
+# Blink-dot — three critical (blinking) dots + one warning (solid) dot
+cd examples/blink-dot && docker compose up -d
+# open http://localhost:8081
+
+# Heatmap — 13 alerts across APAC/US/EU as a heat density layer
+cd examples/heatmap && docker compose up -d
+# open http://localhost:8082  →  MapWatch.toggleHeatmap() to enable overlay
+```
+
+See [`examples/README.md`](examples/README.md) for the full index.
+
+---
+
 ## Try the demo in 3 minutes
 
 The repo ships with always-firing demo alerts so you can see blinking markers immediately — no real infrastructure needed.
@@ -442,11 +466,11 @@ MapWatch.registerEffect('my-custom-effect', function (event, map, markerMap) {
 
 Built-in effects (in `static/effects/`):
 
-| Effect          | What it does                                                |
-|-----------------|-------------------------------------------------------------|
-| `blink-critical`| CSS pulse animation on `severity=critical` markers          |
-| `heatmap`       | Leaflet.heat density overlay (toggle via `MapWatch.toggleHeatmap()`) |
-| `geohash-grid`  | Draws the geohash bounding rectangle on marker hover        |
+| Effect          | What it does                                                | Example |
+|-----------------|-------------------------------------------------------------|---------|
+| `blink-critical`| CSS pulse animation on `severity=critical` markers          | [examples/blink-dot](examples/blink-dot/) |
+| `heatmap`       | Leaflet.heat density overlay (toggle via `MapWatch.toggleHeatmap()`) | [examples/heatmap](examples/heatmap/) |
+| `geohash-grid`  | Draws the geohash bounding rectangle on marker hover        | — |
 
 ---
 
@@ -535,10 +559,10 @@ It drives everything — the Go binary embed, Docker image tag, and git tag.
 
 ```bash
 # 1. Bump the version
-echo "v0.1.15" > VERSION
+echo "v0.2.0" > VERSION
 
 # 2. Commit it
-git add . && git commit -m "chore: release v0.1.15"
+git add . && git commit -m "chore: release v0.2.0"
 
 # 3. Tag + push — triggers the GitHub Actions release pipeline
 make release

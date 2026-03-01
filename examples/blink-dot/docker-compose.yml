@@ -1,0 +1,49 @@
+# ── MapWatch — Blink-dot example ──────────────────────────────────────────────
+#
+# Demonstrates the CSS pulse animation on severity=critical markers.
+# Four global alerts fire immediately; three blink (critical) and one is solid (warning).
+#
+# Start:
+#   cd examples/blink-dot
+#   docker compose up -d
+#
+# Open http://localhost:8081 and watch the dots appear within ~15 seconds.
+
+services:
+  mapwatch:
+    image: ghcr.io/teochenglim/mapwatch:latest
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./mapwatch.yaml:/mapwatch.yaml:ro
+    environment:
+      MAPWATCH_SERVER_ADDR: ":8080"
+      MAPWATCH_PROMETHEUS_URL: "http://prometheus:9090"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alerts.yml:/etc/prometheus/alerts.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    ports:
+      - "9094:9093"
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:

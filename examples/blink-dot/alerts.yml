@@ -1,0 +1,60 @@
+# Blink-dot demo alert rules.
+#
+# All four rules use vector(1) so they fire immediately without real metrics.
+#
+# severity=critical  →  dot gets the CSS pulse/blink animation (mw-pulse class)
+# severity=warning   →  solid yellow dot, no animation
+#
+# Geo is resolved from the geohash label.  See mapwatch.yaml for the
+# datacenter → geohash location table used by some alerts.
+
+groups:
+  - name: blink-dot-demo
+    rules:
+      - alert: HighCPU
+        expr: vector(1)   # always fires — demo only
+        for: 0s
+        labels:
+          severity: critical
+          geohash: w21zd3         # Singapore CBD  (1.29°N 103.85°E)
+          instance: sg-prod-1
+          datacenter: sg-dc-1
+        annotations:
+          summary: "CPU above 90% — this dot blinks"
+          description: "severity=critical triggers the CSS pulse animation on this marker"
+
+      - alert: MemoryLeak
+        expr: vector(1)   # always fires — demo only
+        for: 0s
+        labels:
+          severity: critical
+          geohash: dr5reg         # New York  (40.71°N 74.01°W)
+          instance: ny-prod-1
+          datacenter: us-east-1
+        annotations:
+          summary: "Memory usage critical — this dot blinks"
+          description: "Critical severity triggers the blinking pulse on this NY marker"
+
+      - alert: ServiceDown
+        expr: vector(1)   # always fires — demo only
+        for: 0s
+        labels:
+          severity: critical
+          geohash: gc6uf          # Dublin / EU West  (53.33°N 6.24°W)
+          instance: eu-prod-1
+          datacenter: eu-west-1
+        annotations:
+          summary: "Service unreachable — this dot blinks"
+          description: "A third continent, a third blinking dot"
+
+      - alert: DiskWarning
+        expr: vector(1)   # always fires — demo only
+        for: 0s
+        labels:
+          severity: warning
+          geohash: 9q8yy          # Los Angeles / US West  (34.05°N 118.25°W)
+          instance: us-prod-1
+          datacenter: us-west-2
+        annotations:
+          summary: "Disk at 80% — solid dot (warning, no blink)"
+          description: "severity=warning renders as a solid yellow dot without animation"
