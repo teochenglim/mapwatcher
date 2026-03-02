@@ -2,7 +2,7 @@
 #
 # These always-firing rules demonstrate the DC baseline marker feature:
 #   • 5 green dots appear immediately on page load (one per location in mapwatch.yaml)
-#   • sg-dc-1 (CBD)  → 1 alert fires  → dot turns red, no badge
+#   • sg-dc-1 (CBD)  → 1 alert fires  → dot turns yellow, no badge
 #   • sg-dc-2 (West) → 2 alerts fire  → dot turns red with badge "2"
 #   • sg-dc-3/4/5    → no alerts      → dots stay green (healthy)
 #
@@ -15,12 +15,12 @@ groups:
         expr: vector(1)
         for: 0s
         labels:
-          severity: critical
+          severity: warning
           datacenter: sg-dc-1
           instance: sg-prod-cbd-1
         annotations:
           summary: "CPU usage above 90%"
-          description: "One critical alert on sg-dc-1 — dot turns red, no badge"
+          description: "One warning alert on sg-dc-1 — dot turns yellow, no badge"
 
   - name: demo-west
     rules:

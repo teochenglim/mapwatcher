@@ -7,6 +7,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -24,10 +27,14 @@ type Handlers struct {
 	amTrans         *transformer.AlertmanagerTransformer
 	promProxy       *transformer.PromProxy
 	promExternalURL string
-	locations       map[string]string    // name → geohash, for /api/config baseline dots
+	locations       map[string]string      // name → geohash, for /api/config baseline dots
 	heatmapRegions  []config.HeatmapRegion // optional region aggregation zones
+	dataDir         string                 // directory for locally-downloaded GeoJSON files
 	upgrader        *websocket.Upgrader
 }
+
+// validGeoJSONName matches safe file identifiers (letters, digits, hyphens, underscores).
+var validGeoJSONName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 // writeJSON sends v as a JSON response with the given status code.
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
@@ -247,6 +254,36 @@ func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {
 		"locations":      locs,
 		"heatmapRegions": regions,
 	})
+}
+
+// ServeGeoJSON handles GET /api/geojson/{name} — serves a locally-downloaded GeoJSON file.
+// {name} must be alphanumeric (hyphens/underscores allowed); the file is read from
+// dataDir/{name}.geojson.  Run `mapwatch download-sg` first to populate the data dir.
+func (h *Handlers) ServeGeoJSON(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "name")
+	if !validGeoJSONName.MatchString(name) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid name"})
+		return
+	}
+
+	path := filepath.Join(h.dataDir, name+".geojson")
+	f, err := os.Open(path) //nolint:gosec
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, map[string]string{
+				"error": fmt.Sprintf("GeoJSON %q not found — run: mapwatch download-sg", name),
+			})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer f.Close()
+
+	w.Header().Set("Content-Type", "application/geo+json")
+	if _, err := io.Copy(w, f); err != nil {
+		log.Printf("ServeGeoJSON: copy error: %v", err)
+	}
 }
 
 // ServeWS handles GET /ws — WebSocket upgrade.

@@ -12,7 +12,9 @@ import (
 )
 
 // New builds and returns the HTTP server, wiring all dependencies.
-func New(cfg *config.Config, staticFS http.FileSystem) *http.Server {
+// dataDir is the directory from which locally-downloaded GeoJSON files are served
+// (e.g. ./data); pass an empty string to disable GeoJSON serving.
+func New(cfg *config.Config, staticFS http.FileSystem, dataDir string) *http.Server {
 	store := marker.NewStore(cfg.Spread.Radius)
 	hub := NewHub(store)
 	amTrans := transformer.NewAlertmanagerTransformer(cfg.Locations)
@@ -34,6 +36,7 @@ func New(cfg *config.Config, staticFS http.FileSystem) *http.Server {
 		promExternalURL: cfg.Prometheus.ExternalURL,
 		locations:       cfg.Locations,
 		heatmapRegions:  cfg.Heatmap.Regions,
+		dataDir:         dataDir,
 		upgrader:        upgrader,
 	}
 
@@ -49,6 +52,7 @@ func New(cfg *config.Config, staticFS http.FileSystem) *http.Server {
 	r.Delete("/api/markers/{id}", h.DeleteMarker)
 	r.Get("/api/markers/{id}/details", h.GetMarkerDetails)
 	r.Get("/api/markers/{id}/links", h.GetMarkerLinks)
+	r.Get("/api/geojson/{name}", h.ServeGeoJSON)
 
 	// WebSocket
 	r.Get("/ws", h.ServeWS)

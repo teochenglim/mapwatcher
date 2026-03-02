@@ -49,6 +49,11 @@
   // DC baseline markers: name → { leafletMarker, alerts: {alertId→data}, lat, lng }
   let dcMarkers = {};
 
+  // SG NPC boundary overlay (L.geoJSON layer, lazy-loaded)
+  let npcLayer     = null;
+  let npcVisible   = false;
+  let npcLoading   = false;
+
   // ── Initialise map ────────────────────────────────────────────────────────────
 
   // Singapore bounding box — matches geo/slice.go RegionBounds["SG"]
@@ -642,6 +647,74 @@
       .replace(/"/g, '&quot;');
   }
 
+  // ── SG NPC Boundary overlay ───────────────────────────────────────────────────
+
+  function styleNPCFeature(_feature) {
+    return {
+      color:       '#4fc3f7',
+      weight:      1.5,
+      opacity:     0.8,
+      fillColor:   '#4fc3f7',
+      fillOpacity: 0.06,
+    };
+  }
+
+  function onEachNPCFeature(feature, layer) {
+    const p = feature.properties || {};
+    const name = p.NPC_NAME || p.Name || p.name || '';
+    const div  = p.DIVISION  || p.Division  || '';
+    if (name) {
+      layer.bindTooltip(
+        `<div class="mw-tt-title">${e(name)}</div>` +
+        (div ? `<div class="mw-tt-row">Division: ${e(div)}</div>` : ''),
+        { sticky: true, className: 'mw-tooltip', opacity: 1 }
+      );
+    }
+  }
+
+  function toggleNPCZones(btn) {
+    if (npcLoading) return;
+
+    // If already loaded, just toggle visibility.
+    if (npcLayer) {
+      npcVisible = !npcVisible;
+      if (npcVisible) {
+        npcLayer.addTo(map);
+        btn && btn.classList.add('active');
+      } else {
+        npcLayer.remove();
+        btn && btn.classList.remove('active');
+      }
+      return;
+    }
+
+    // First call — fetch and build the layer.
+    npcLoading = true;
+    btn && (btn.textContent = 'Loading…');
+
+    fetch('/api/geojson/sg-npc-boundary')
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(geojson => {
+        npcLayer = L.geoJSON(geojson, {
+          style:          styleNPCFeature,
+          onEachFeature:  onEachNPCFeature,
+        }).addTo(map);
+        npcVisible = true;
+        npcLoading = false;
+        btn && (btn.textContent = 'NPC Zones');
+        btn && btn.classList.add('active');
+      })
+      .catch(err => {
+        npcLoading = false;
+        btn && (btn.textContent = 'NPC Zones');
+        console.error('NPC zones load failed:', err);
+        alert('Could not load NPC boundary data.\nRun: mapwatch download-sg');
+      });
+  }
+
   // ── Public API ────────────────────────────────────────────────────────────────
 
   window.MapWatch = {
@@ -650,6 +723,7 @@
     openPanel,
     openDCPanel,
     closePanel,
+    toggleNPCZones,
     // Heatmap region definitions — populated from /api/config by fetchConfig();
     // read by heatmap.js on every effect invocation.
     heatmapRegions: [],

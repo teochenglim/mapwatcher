@@ -11,7 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var servePort string
+var servePort    string
+var serveDataDir string
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -28,7 +29,7 @@ var serveCmd = &cobra.Command{
 		}
 
 		staticFS := mapwatch.StaticHTTPFS()
-		srv := server.New(cfg, staticFS)
+		srv := server.New(cfg, staticFS, serveDataDir)
 
 		log.Printf("mapwatch listening on %s", cfg.Server.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -40,5 +41,6 @@ var serveCmd = &cobra.Command{
 
 func init() {
 	serveCmd.Flags().StringVarP(&servePort, "port", "p", "", "Port to listen on (overrides config and MAPWATCH_SERVER_ADDR)")
+	serveCmd.Flags().StringVar(&serveDataDir, "data-dir", "./data", "Directory containing locally-downloaded GeoJSON files")
 	rootCmd.AddCommand(serveCmd)
 }
