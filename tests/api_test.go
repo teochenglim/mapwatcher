@@ -32,7 +32,7 @@ func newTestServer(t *testing.T) *httptest.Server {
 			"default": {{Label: "Up", Query: `up`}},
 		},
 	}
-	srv := server.New(cfg, nil)
+	srv := server.New(cfg, nil, "")
 	return httptest.NewServer(srv.Handler)
 }
 
