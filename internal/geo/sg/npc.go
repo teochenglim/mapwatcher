@@ -1,4 +1,4 @@
-package geo
+package sg
 
 import (
 	"encoding/json"

@@ -271,6 +271,27 @@
     }
     .dc-sev-seg { border-radius: 3px; }
 
+    /* ── Zoom slider ── */
+    #zoom-slider {
+      width: 72px;
+      height: 4px;
+      -webkit-appearance: none;
+      appearance: none;
+      border-radius: 2px;
+      background: #30363d;
+      outline: none;
+      cursor: pointer;
+      accent-color: #58a6ff;
+      vertical-align: middle;
+    }
+    #zoom-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: #58a6ff;
+      cursor: pointer;
+    }
+
     /* ── Mouse coordinate display ── */
     #map-coords {
       position: absolute;
@@ -318,15 +339,38 @@
     <h1>MapWatch</h1>
     <div class="tb-sep"></div>
     <div id="ws-status" title="WebSocket connection"></div>
+
     <div class="tb-sep"></div>
+
+    <!-- Theme -->
     <button class="tb-btn active" id="btn-dark"      onclick="MapWatch.setTheme('dark')">Dark</button>
     <button class="tb-btn"        id="btn-light"     onclick="MapWatch.setTheme('light')">Light</button>
     <button class="tb-btn"        id="btn-satellite" onclick="MapWatch.setTheme('satellite')">Satellite</button>
+
     <div class="tb-sep"></div>
+
+    <!-- Navigation -->
+    <button class="tb-btn" title="Reset to full Singapore view" onclick="MapWatch.resetToSG()">↺ Home</button>
+    <input  id="zoom-slider" type="range" min="10" max="19" step="1" value="12"
+            title="Zoom level" oninput="MapWatch.setZoom(this.value)" />
+
+    <div class="tb-sep"></div>
+
+    <!-- Overlays (data files optional — see mapwatch download-sg) -->
     <button class="tb-btn active" id="btn-heatmap"
             onclick="if(MapWatch.toggleHeatmap){MapWatch.toggleHeatmap();this.classList.toggle('active')}">Heatmap</button>
-    <button class="tb-btn" id="btn-npc-zones"
-            onclick="MapWatch.toggleNPCZones(this)">NPC Zones</button>
+    <button class="tb-btn" id="btn-layer-division"
+            onclick="MapWatch.toggleLayer('division',this)">Divisions</button>
+    <button class="tb-btn" id="btn-layer-roads"
+            onclick="MapWatch.toggleLayer('roads',this)">Roads</button>
+    <button class="tb-btn" id="btn-layer-cycling"
+            onclick="MapWatch.toggleLayer('cycling',this)">Cycling</button>
+    <button class="tb-btn" id="btn-layer-mrt"
+            onclick="MapWatch.toggleLayer('mrt',this)">MRT</button>
+    <button class="tb-btn" id="btn-layer-busstops"
+            onclick="MapWatch.toggleLayer('busStops',this)">Bus Stops</button>
+    <button class="tb-btn" id="btn-layer-busroutes"
+            onclick="MapWatch.toggleLayer('busRoutes',this)">Bus Routes</button>
   </div>
 
   <!-- Mouse coordinate display -->

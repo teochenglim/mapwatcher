@@ -14,8 +14,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w" \
     -o /mapwatch ./cmd/mapwatch
 
-# Download SG NPC boundary GeoJSON at build time (baked into the image).
-RUN /mapwatch download-sg --out /data
+# Download all GeoJSON layers (no API key required)
+RUN /mapwatch download-sg division  --out /data && \
+    /mapwatch download-sg roads     --out /data && \
+    /mapwatch download-sg cycling   --out /data && \
+    /mapwatch download-sg mrt       --out /data && \
+    /mapwatch download-sg busstops  --out /data && \
+    /mapwatch download-sg busroutes --out /data
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM scratch

@@ -37,7 +37,7 @@ func alert(fp string, labels map[string]string) amTestAlert {
 }
 
 func TestAlertmanagerGeohashLabel(t *testing.T) {
-	tr := transformer.NewAlertmanagerTransformer(nil)
+	tr := transformer.NewAlertmanagerTransformer(nil, nil)
 	markers, err := tr.Transform(buildPayload(alert("fp1", map[string]string{
 		"alertname": "HighCPU", "severity": "critical", "geohash": "w21zd3",
 	})))
@@ -66,7 +66,7 @@ func TestAlertmanagerGeohashLabel(t *testing.T) {
 }
 
 func TestAlertmanagerLatLngLabels(t *testing.T) {
-	tr := transformer.NewAlertmanagerTransformer(nil)
+	tr := transformer.NewAlertmanagerTransformer(nil, nil)
 	markers, err := tr.Transform(buildPayload(alert("fp2", map[string]string{
 		"alertname": "DiskFull", "severity": "warning",
 		"lat": "1.3521", "lng": "103.8198",
@@ -84,7 +84,7 @@ func TestAlertmanagerLatLngLabels(t *testing.T) {
 }
 
 func TestAlertmanagerDatacenterLookup(t *testing.T) {
-	tr := transformer.NewAlertmanagerTransformer(map[string]string{"sg-dc-1": "w21zd3"})
+	tr := transformer.NewAlertmanagerTransformer(map[string]string{"sg-dc-1": "w21zd3"}, nil)
 	markers, err := tr.Transform(buildPayload(alert("fp3", map[string]string{
 		"alertname": "Net", "datacenter": "sg-dc-1",
 	})))
@@ -100,7 +100,7 @@ func TestAlertmanagerDatacenterLookup(t *testing.T) {
 }
 
 func TestAlertmanagerNoGeoSkipped(t *testing.T) {
-	tr := transformer.NewAlertmanagerTransformer(nil)
+	tr := transformer.NewAlertmanagerTransformer(nil, nil)
 	markers, err := tr.Transform(buildPayload(alert("fp4", map[string]string{
 		"alertname": "Mystery",
 	})))
@@ -113,7 +113,7 @@ func TestAlertmanagerNoGeoSkipped(t *testing.T) {
 }
 
 func TestAlertmanagerGeohashPriorityOverLatLng(t *testing.T) {
-	tr := transformer.NewAlertmanagerTransformer(nil)
+	tr := transformer.NewAlertmanagerTransformer(nil, nil)
 	markers, err := tr.Transform(buildPayload(alert("fp5", map[string]string{
 		"geohash": "w21zd3", "lat": "0.0", "lng": "0.0",
 	})))
@@ -126,7 +126,7 @@ func TestAlertmanagerGeohashPriorityOverLatLng(t *testing.T) {
 }
 
 func TestAlertmanagerMixedBatch(t *testing.T) {
-	tr := transformer.NewAlertmanagerTransformer(nil)
+	tr := transformer.NewAlertmanagerTransformer(nil, nil)
 	markers, err := tr.Transform(buildPayload(
 		alert("ok1", map[string]string{"geohash": "w21zd3"}),
 		alert("ok2", map[string]string{"geohash": "w21z8k"}),
@@ -141,8 +141,46 @@ func TestAlertmanagerMixedBatch(t *testing.T) {
 }
 
 func TestAlertmanagerInvalidJSON(t *testing.T) {
-	tr := transformer.NewAlertmanagerTransformer(nil)
+	tr := transformer.NewAlertmanagerTransformer(nil, nil)
 	if _, err := tr.Transform([]byte(`not json`)); err == nil {
 		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestAlertmanagerLocationLookup(t *testing.T) {
+	tr := transformer.NewAlertmanagerTransformer(map[string]string{"sg-dc-1": "w21zd3"}, nil)
+	markers, _, err := tr.TransformPayload(buildPayload(alert("loc1", map[string]string{
+		"alertname": "Test", "severity": "warning", "location": "sg-dc-1",
+	})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(markers) != 1 {
+		t.Fatalf("expected 1 marker from location label, got %d", len(markers))
+	}
+	if markers[0].Geohash != "w21zd3" {
+		t.Errorf("expected geohash from location lookup, got %q", markers[0].Geohash)
+	}
+}
+
+func TestAlertmanagerCustomPriority(t *testing.T) {
+	// Put location before datacenter — location label should win.
+	priority := []string{"location", "datacenter", "geohash", "lat_lng"}
+	tr := transformer.NewAlertmanagerTransformer(
+		map[string]string{"sg-dc-1": "w21zd3", "sg-dc-2": "w21z8k"},
+		priority,
+	)
+	// Alert has both location and datacenter; location should be checked first.
+	markers, _, err := tr.TransformPayload(buildPayload(alert("pri1", map[string]string{
+		"alertname": "Test", "location": "sg-dc-1", "datacenter": "sg-dc-2",
+	})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(markers) != 1 {
+		t.Fatalf("expected 1 marker, got %d", len(markers))
+	}
+	if markers[0].Geohash != "w21zd3" {
+		t.Errorf("location should win with custom priority, got geohash %q", markers[0].Geohash)
 	}
 }

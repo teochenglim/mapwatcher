@@ -29,6 +29,7 @@ type Handlers struct {
 	promExternalURL string
 	locations       map[string]string      // name → geohash, for /api/config baseline dots
 	heatmapRegions  []config.HeatmapRegion // optional region aggregation zones
+	layers          config.LayersConfig    // optional overlay auto-enable settings
 	dataDir         string                 // directory for locally-downloaded GeoJSON files
 	upgrader        *websocket.Upgrader
 }
@@ -253,6 +254,14 @@ func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {
 		"prometheusUrl":  h.promExternalURL,
 		"locations":      locs,
 		"heatmapRegions": regions,
+		"layers": map[string]bool{
+			"division":  h.layers.Division,
+			"roads":     h.layers.Roads,
+			"cycling":   h.layers.Cycling,
+			"mrt":       h.layers.MRT,
+			"busStops":  h.layers.BusStops,
+			"busRoutes": h.layers.BusRoutes,
+		},
 	})
 }
 

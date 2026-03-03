@@ -29,16 +29,24 @@ type amAlert struct {
 
 // AlertmanagerTransformer converts Alertmanager webhook payloads into Markers.
 type AlertmanagerTransformer struct {
-	// Locations maps datacenter/region label values to geohash strings.
+	// Locations maps label values (datacenter, location, region …) to geohash strings.
 	Locations map[string]string
+	// GeoPriority is the ordered list of label keys used to resolve an alert's position.
+	// Sentinel values: "geohash" and "lat_lng". All other values are label names looked
+	// up in Locations. Defaults to ["geohash","lat_lng","datacenter","location","region"].
+	GeoPriority []string
 }
 
-// NewAlertmanagerTransformer returns a transformer backed by the given location table.
-func NewAlertmanagerTransformer(locations map[string]string) *AlertmanagerTransformer {
+// NewAlertmanagerTransformer returns a transformer backed by the given location table
+// and geo resolution priority list. Pass nil for geoPriority to use the default order.
+func NewAlertmanagerTransformer(locations map[string]string, geoPriority []string) *AlertmanagerTransformer {
 	if locations == nil {
 		locations = make(map[string]string)
 	}
-	return &AlertmanagerTransformer{Locations: locations}
+	if len(geoPriority) == 0 {
+		geoPriority = []string{"geohash", "lat_lng", "datacenter", "location", "region"}
+	}
+	return &AlertmanagerTransformer{Locations: locations, GeoPriority: geoPriority}
 }
 
 func (t *AlertmanagerTransformer) Name() string { return "alertmanager" }
@@ -101,39 +109,41 @@ func (t *AlertmanagerTransformer) alertToMarker(a amAlert) (*marker.Marker, erro
 	return m, nil
 }
 
-// resolveGeo applies the priority chain: geohash → lat/lng → datacenter lookup.
+// resolveGeo resolves an alert's map position by iterating t.GeoPriority in order.
+// Each step is either a sentinel ("geohash", "lat_lng") or a label name looked up
+// in t.Locations (e.g. "datacenter", "location", "region").
 func (t *AlertmanagerTransformer) resolveGeo(labels map[string]string) (lat, lng float64, geohashStr string, bounds *geo.GeoBounds, err error) {
-	// Priority 1: geohash label
-	if h, ok := labels["geohash"]; ok && h != "" {
-		center, b, decErr := geo.DecodeGeohash(h)
-		if decErr == nil {
-			return center.Lat, center.Lng, h, &b, nil
-		}
-		log.Printf("resolveGeo: invalid geohash %q: %v", h, decErr)
-	}
-
-	// Priority 2: lat + lng labels
-	if latStr, ok := labels["lat"]; ok {
-		if lngStr, ok2 := labels["lng"]; ok2 {
-			parsedLat, errLat := strconv.ParseFloat(latStr, 64)
-			parsedLng, errLng := strconv.ParseFloat(lngStr, 64)
-			if errLat == nil && errLng == nil {
-				return parsedLat, parsedLng, "", nil, nil
-			}
-		}
-	}
-
-	// Priority 3: datacenter / region lookup
-	for _, key := range []string{"datacenter", "region"} {
-		if val, ok := labels[key]; ok && val != "" {
-			if h, ok2 := t.Locations[val]; ok2 {
+	for _, step := range t.GeoPriority {
+		switch step {
+		case "geohash":
+			if h, ok := labels["geohash"]; ok && h != "" {
 				center, b, decErr := geo.DecodeGeohash(h)
 				if decErr == nil {
 					return center.Lat, center.Lng, h, &b, nil
 				}
+				log.Printf("resolveGeo: invalid geohash %q: %v", h, decErr)
+			}
+		case "lat_lng":
+			if latStr, ok := labels["lat"]; ok {
+				if lngStr, ok2 := labels["lng"]; ok2 {
+					parsedLat, errLat := strconv.ParseFloat(latStr, 64)
+					parsedLng, errLng := strconv.ParseFloat(lngStr, 64)
+					if errLat == nil && errLng == nil {
+						return parsedLat, parsedLng, "", nil, nil
+					}
+				}
+			}
+		default:
+			// Named label lookup: datacenter, location, region, or any custom key.
+			if val, ok := labels[step]; ok && val != "" {
+				if h, ok2 := t.Locations[val]; ok2 {
+					center, b, decErr := geo.DecodeGeohash(h)
+					if decErr == nil {
+						return center.Lat, center.Lng, h, &b, nil
+					}
+				}
 			}
 		}
 	}
-
 	return 0, 0, "", nil, fmt.Errorf("no resolvable geo info in labels %v", labels)
 }

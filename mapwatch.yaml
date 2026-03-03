@@ -9,10 +9,13 @@ prometheus:
 spread:
   radius: 0.01
 
-# ── Blink-dot: DC baseline markers ───────────────────────────────────────────
+# ── Baseline locations ────────────────────────────────────────────────────────
 # Each entry renders as a green "healthy" dot on map load.
-# When an alert fires with a matching `datacenter:` label, the dot turns
-# red/yellow and blinks (critical) or dims (warning/info).
+# When an alert fires with a matching label value, the dot turns red/yellow.
+# Supported alert labels (checked in geo_label_priority order):
+#   datacenter: sg-dc-1   ← most common
+#   location:   sg-dc-1   ← alias for datacenter
+#   region:     sg-dc-1   ← same lookup
 # sg-dc-1 fires 1 alert; sg-dc-2 fires 2 alerts; the rest stay green.
 locations:
   sg-dc-1: w21zd3   # Singapore CBD
@@ -34,6 +37,32 @@ heatmap:
       bounds: [[1.3203, 103.7054], [1.3958, 103.7885]]
     - name: "Central SG"
       bounds: [[1.3134, 103.8002], [1.3533, 103.8764]]
+
+# ── Geo resolution priority ───────────────────────────────────────────────────
+# Labels checked in order when placing an alert on the map.
+# Sentinel values:  "geohash" → labels.geohash
+#                   "lat_lng" → labels.lat + labels.lng
+# All other values are alert label names looked up in locations: above.
+# Reorder to change precedence; add any custom label name as an extra step.
+# Default (used when this key is absent):
+# geo_label_priority:
+#   - geohash
+#   - lat_lng
+#   - datacenter
+#   - location
+#   - region
+
+# ── Optional map overlays ─────────────────────────────────────────────────────
+# Pre-download data files with: mapwatch download-sg <layer>
+# Set true to auto-enable the overlay at startup; false = toolbar-only.
+# All sources are open data — no API key required.
+layers:
+  division:   true   # NPC police division boundaries   → mapwatch download-sg division
+  roads:      true   # expressways + major roads         → mapwatch download-sg roads
+  cycling:    true   # cycling paths                     → mapwatch download-sg cycling
+  mrt:        true   # MRT/LRT rail lines                → mapwatch download-sg mrt
+  bus_stops:  true   # bus stop points                   → mapwatch download-sg busstops
+  bus_routes: true   # bus route lines                   → mapwatch download-sg busroutes
 
 # PromQL templates shown in the side panel when clicking a marker.
 query_templates:

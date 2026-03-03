@@ -17,7 +17,7 @@ import (
 func New(cfg *config.Config, staticFS http.FileSystem, dataDir string) *http.Server {
 	store := marker.NewStore(cfg.Spread.Radius)
 	hub := NewHub(store)
-	amTrans := transformer.NewAlertmanagerTransformer(cfg.Locations)
+	amTrans := transformer.NewAlertmanagerTransformer(cfg.Locations, cfg.GeoPriority)
 
 	var promProxy *transformer.PromProxy
 	if cfg.Prometheus.URL != "" {
@@ -36,6 +36,7 @@ func New(cfg *config.Config, staticFS http.FileSystem, dataDir string) *http.Ser
 		promExternalURL: cfg.Prometheus.ExternalURL,
 		locations:       cfg.Locations,
 		heatmapRegions:  cfg.Heatmap.Regions,
+		layers:          cfg.Layers,
 		dataDir:         dataDir,
 		upgrader:        upgrader,
 	}

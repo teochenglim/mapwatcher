@@ -354,10 +354,28 @@ groups:
 ```
 
 **Geo resolution priority** (first match wins):
-1. `geohash` label
-2. `lat` + `lng` labels
-3. `datacenter` or `region` label → config lookup table
-4. Alert skipped with a warning log (no crash)
+
+| Priority | Config key | Alert label(s) | How it resolves |
+|----------|------------|----------------|-----------------|
+| 1 | `geohash` | `geohash` | Decoded directly to lat/lng + bounds |
+| 2 | `lat_lng` | `lat` + `lng` | Parsed as float64 pair |
+| 3 | `datacenter` | `datacenter` | Name looked up in `locations:` map |
+| 4 | `location` | `location` | Same lookup as datacenter (natural text alias) |
+| 5 | `region` | `region` | Same lookup as datacenter |
+| — | _(none matched)_ | — | Alert skipped with a warning log |
+
+The `location` label accepts the same plain text values as `datacenter` (e.g. `location: sg-dc-1`).
+
+To swap the order or add a custom label key, set `geo_label_priority:` in `mapwatch.yaml`:
+
+```yaml
+geo_label_priority:
+  - geohash
+  - lat_lng
+  - location     # check location before datacenter
+  - datacenter
+  - region
+```
 
 ---
 
@@ -402,10 +420,51 @@ Template variables are the alert's **full label map** — use `{{.labelname}}` f
 ## CLI reference
 
 ```
+mapwatch serve                 Start the HTTP server
 mapwatch download              Download world GeoJSON from Natural Earth
+mapwatch download-sg <layer>   Download Singapore geospatial layers (all optional)
 mapwatch slice --region=SG     Clip GeoJSON to a region bounding box
 mapwatch export                Export self-contained static HTML (no server)
-mapwatch serve                 Start the HTTP server
+```
+
+### `mapwatch download-sg`
+
+Pre-download optional Singapore map overlay layers into the data directory.
+All layers are served by `mapwatch serve` via `GET /api/geojson/<name>` and
+toggled from the toolbar at runtime.
+
+| Sub-command | File saved | Source |
+|-------------|-----------|--------|
+| `download-sg division` | `sg-npc-boundary.geojson` | data.gov.sg (SPF NPC boundaries) |
+| `download-sg roads` | `sg-roads.geojson` | data.gov.sg (SLA National Map Line, filtered) |
+| `download-sg cycling` | `sg-cycling.geojson` | data.gov.sg (LTA Cycling Path Network) |
+| `download-sg mrt` | `sg-mrt.geojson` | data.gov.sg (URA Master Plan 2019 Rail Line) |
+| `download-sg busstops` | `sg-bus-stops.geojson` | busrouter.sg |
+| `download-sg busroutes` | `sg-bus-routes.geojson` | busrouter.sg |
+
+```bash
+# Download all layers at once
+mapwatch download-sg division --out ./data
+mapwatch download-sg roads    --out ./data
+mapwatch download-sg cycling  --out ./data
+mapwatch download-sg mrt      --out ./data
+mapwatch download-sg busstops --out ./data
+mapwatch download-sg busroutes --out ./data
+```
+
+The `roads` command automatically filters the 605 MB raw dataset down to
+~3.4 MB (expressways, slip roads, major roads only — contour lines removed).
+
+Enable layers at server startup via `mapwatch.yaml`:
+
+```yaml
+layers:
+  division:   true
+  roads:      true
+  cycling:    true
+  mrt:        true
+  bus_stops:  true
+  bus_routes: true
 ```
 
 ### `mapwatch download`
@@ -521,6 +580,14 @@ heatmap:                         # choropleth rectangle overlay (shown by defaul
     - name: "Central SG"
       bounds: [[1.3134, 103.8002], [1.3533, 103.8764]]
       color: "#4a9eff"           # optional: overrides severity colour
+
+layers:                          # optional Singapore map overlays
+  division:   false              #   NPC police division boundaries
+  roads:      false              #   expressways + major roads
+  cycling:    false              #   cycling paths
+  mrt:        false              #   MRT/LRT rail lines
+  bus_stops:  false              #   bus stop points
+  bus_routes: false              #   bus route lines
 
 query_templates:                 # alertname → PromQL templates
   HighCPU:
@@ -663,10 +730,10 @@ It drives everything — the Go binary embed, Docker image tag, and git tag.
 
 ```bash
 # 1. Bump the version
-echo "v0.3.1" > VERSION
+echo "v0.4.1" > VERSION
 
 # 2. Commit it
-git add . && git commit -m "release v0.3.1"
+git add . && git commit -m "release v0.4.1"
 
 # 3. Tag + push — triggers the GitHub Actions release pipeline
 make release

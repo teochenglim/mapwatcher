@@ -16,6 +16,20 @@ type Config struct {
 	QueryTemplates map[string][]QueryTemplate `mapstructure:"query_templates"`
 	Spread         SpreadConfig               `mapstructure:"spread"`
 	Heatmap        HeatmapConfig              `mapstructure:"heatmap"`
+	Layers         LayersConfig               `mapstructure:"layers"`
+	GeoPriority    []string                   `mapstructure:"geo_label_priority"`
+}
+
+// LayersConfig controls which optional GeoJSON overlays are enabled at startup.
+// All layers default to false; data files must be downloaded first with the
+// corresponding "mapwatch download-sg-*" commands before enabling.
+type LayersConfig struct {
+	Division  bool `mapstructure:"division"`   // NPC police division boundaries
+	Roads     bool `mapstructure:"roads"`      // expressways and major roads
+	Cycling   bool `mapstructure:"cycling"`    // cycling paths
+	MRT       bool `mapstructure:"mrt"`        // MRT/LRT rail lines
+	BusStops  bool `mapstructure:"bus_stops"`  // bus stop points
+	BusRoutes bool `mapstructure:"bus_routes"` // bus route lines
 }
 
 // HeatmapRegion defines a named spatial zone for choropleth overlay.
@@ -97,6 +111,9 @@ func Load(cfgFile string) (*Config, error) {
 	}
 	if cfg.QueryTemplates == nil {
 		cfg.QueryTemplates = make(map[string][]QueryTemplate)
+	}
+	if len(cfg.GeoPriority) == 0 {
+		cfg.GeoPriority = []string{"geohash", "lat_lng", "datacenter", "location", "region"}
 	}
 
 	return &cfg, nil

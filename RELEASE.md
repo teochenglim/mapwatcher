@@ -1,5 +1,89 @@
 # MapWatch Release Notes
 
+## v0.4.0
+
+**Singapore transport & infrastructure overlays + map navigation controls**
+
+### New optional map layers (no API key required)
+
+Each layer requires a one-time download. Enable at startup via `mapwatch.yaml`
+or toggle interactively from the toolbar.
+
+| Layer | Command | Source | Output size |
+|-------|---------|--------|-------------|
+| Police divisions | `mapwatch download-sg division` | data.gov.sg (SPF NPC) | ~6 MB |
+| Road network | `mapwatch download-sg roads` | data.gov.sg (SLA National Map Line) | ~3.4 MB (filtered) |
+| Cycling paths | `mapwatch download-sg cycling` | data.gov.sg (LTA) | ~2.8 MB |
+| MRT/LRT lines | `mapwatch download-sg mrt` | data.gov.sg (URA Master Plan 2019) | ~22 MB |
+| Bus stops | `mapwatch download-sg busstops` | busrouter.sg | ~1.1 MB |
+| Bus routes | `mapwatch download-sg busroutes` | busrouter.sg | ~8.9 MB |
+
+All layers are downloaded from official Singapore government sources (data.gov.sg)
+or busrouter.sg. No API keys required.
+
+The `roads` command downloads the full 605 MB SLA National Map Line, then filters
+it in-memory to keep only expressways, slip roads, and major roads (~9,165 features),
+deleting the raw file automatically. See [ROAD.md](ROAD.md) for dataset details.
+
+### New `layers:` config section in mapwatch.yaml
+
+Enable layers at server startup (defaults all `false`):
+
+```yaml
+layers:
+  division:   false   # NPC police division boundaries
+  roads:      false   # expressways and major roads
+  cycling:    false   # cycling paths
+  mrt:        false   # MRT/LRT rail lines
+  bus_stops:  false   # bus stop points
+  bus_routes: false   # bus route lines
+```
+
+### Map navigation controls
+
+- **Pan and zoom re-enabled** — drag to pan, scroll to zoom
+- **Reset button (⊙ SG)** — returns to the default full-Singapore view instantly
+- **Zoom slider** — scrub zoom level 10–19 in the toolbar; syncs bidirectionally with Leaflet zoom
+- **Native zoom buttons** — Leaflet +/− control shown at bottom-right
+
+### Architecture refactor
+
+- Download functions moved to `internal/geo/sg/` sub-package — pattern extensible for `internal/geo/my/`, etc.
+- Generic helpers (`DownloadHTTP`, `SaveBody`) exported from `internal/geo`; `OverpassFetch` retained but no longer used for SG layers
+- CLI restructured: `mapwatch download-sg <layer>` sub-command tree instead of flat flags
+- `GET /api/config` returns `layers` object; frontend auto-enables layers configured as `true`
+- data.gov.sg poll-download helper retries up to 4× with exponential backoff on HTTP 429 (rate limit)
+
+---
+
+## v0.3.1
+
+**Patch — NPC boundary stability + docs**
+
+- Fix: test coverage for NPC boundary response parsing edge cases
+- Docs: README updated with `mapwatch download-sg` usage example and screenshots
+- No breaking changes from v0.3.0
+
+---
+
+## v0.3.0
+
+**Singapore Police Division (NPC) boundary overlay**
+
+- New command: `mapwatch download-sg` — fetches Singapore Police Force NPC Boundary GeoJSON from data.gov.sg (two-step poll-download API)
+- New toolbar button: **NPC Zones** — lazy-loads `sg-npc-boundary.geojson` and renders cyan polygon boundaries with tooltips (NPC name + division)
+- New REST endpoint: `GET /api/geojson/{name}` — serves any locally-downloaded GeoJSON file from the data directory; returns a 404 with hint when file is missing
+- Styled Leaflet overlay: thin cyan outline, subtle 6% opacity fill, sticky tooltip showing NPC name and division
+- Toggle is idempotent — subsequent clicks show/hide without re-fetching
+
+**How to use:**
+```bash
+mapwatch download-sg --out ./data   # fetch sg-npc-boundary.geojson
+mapwatch serve                       # click "NPC Zones" in toolbar
+```
+
+---
+
 ## v0.2.5
 
 **Heatmap UX overhaul + green dot animation** (breaking config change — see migration)

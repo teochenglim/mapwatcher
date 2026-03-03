@@ -1,7 +1,7 @@
 /**
  * MapWatch — core client-side JS
  * Handles: WebSocket, marker management, clustering, side panel, themes,
- *          DC baseline markers, multi-alert aggregation.
+ *          DC baseline markers, multi-alert aggregation, SG overlay layers.
  */
 (function () {
   'use strict';
@@ -49,10 +49,57 @@
   // DC baseline markers: name → { leafletMarker, alerts: {alertId→data}, lat, lng }
   let dcMarkers = {};
 
-  // SG NPC boundary overlay (L.geoJSON layer, lazy-loaded)
-  let npcLayer     = null;
-  let npcVisible   = false;
-  let npcLoading   = false;
+  // ── SG Overlay layers (all lazy-loaded, all off by default) ──────────────────
+  // Each entry: { layer, visible, loading }
+
+  const layerState = {
+    division:  { layer: null, visible: false, loading: false },
+    roads:     { layer: null, visible: false, loading: false },
+    cycling:   { layer: null, visible: false, loading: false },
+    mrt:       { layer: null, visible: false, loading: false },
+    busStops:  { layer: null, visible: false, loading: false },
+    busRoutes: { layer: null, visible: false, loading: false },
+  };
+
+  // Map layer key → { geojsonFile, geoJSONOptions, cmdSuffix }
+  const LAYER_DEFS = {
+    division: {
+      file: 'sg-npc-boundary',
+      options: { style: _styleNPC, onEachFeature: _onEachNPC },
+      cmd: 'division',
+    },
+    roads: {
+      file: 'sg-roads',
+      options: { style: _styleRoads },
+      cmd: 'roads',
+    },
+    cycling: {
+      file: 'sg-cycling',
+      options: { style: _styleCycling },
+      cmd: 'cycling',
+    },
+    mrt: {
+      file: 'sg-mrt',
+      options: { style: _styleMRT, onEachFeature: _onEachMRT },
+      cmd: 'mrt',
+    },
+    busStops: {
+      file: 'sg-bus-stops',
+      options: {
+        pointToLayer: (_f, latlng) => L.circleMarker(latlng, {
+          radius: 3, fillColor: '#f59e0b', color: '#f59e0b',
+          weight: 1, opacity: 0.8, fillOpacity: 0.6,
+        }),
+        onEachFeature: _onEachBusStop,
+      },
+      cmd: 'busstops',
+    },
+    busRoutes: {
+      file: 'sg-bus-routes',
+      options: { style: _styleBusRoutes, onEachFeature: _onEachBusRoute },
+      cmd: 'busroutes',
+    },
+  };
 
   // ── Initialise map ────────────────────────────────────────────────────────────
 
@@ -60,17 +107,19 @@
   const SG_BOUNDS = [[1.159, 103.605], [1.482, 104.088]];
 
   function init() {
-    // All user interaction disabled — the map is a fixed viewport of Singapore.
     map = L.map('map', {
-      zoomControl:       false,
-      dragging:          false,
-      touchZoom:         false,
-      scrollWheelZoom:   false,
-      doubleClickZoom:   false,
-      boxZoom:           false,
-      keyboard:          false,
-      preferCanvas:      true,
+      zoomControl:     false,   // we provide our own zoom UI
+      preferCanvas:    true,
     }).fitBounds(SG_BOUNDS, { padding: [20, 20] });
+
+    // Zoom control — bottom-right so it doesn't overlap the toolbar.
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    // Sync zoom slider whenever map zoom changes.
+    map.on('zoom', () => {
+      const slider = document.getElementById('zoom-slider');
+      if (slider) slider.value = map.getZoom();
+    });
 
     tileLayer = L.tileLayer(THEMES.dark.url, {
       attribution: THEMES.dark.attribution,
@@ -96,7 +145,11 @@
       map.on('mouseout', () => { coordEl.style.display = 'none'; });
     }
 
-    // Fetch runtime config (Prometheus external URL, locations, etc.) from server.
+    // Set initial zoom slider value.
+    const slider = document.getElementById('zoom-slider');
+    if (slider) slider.value = map.getZoom();
+
+    // Fetch runtime config (Prometheus external URL, locations, layers, etc.) from server.
     fetchConfig();
     connectWS();
   }
@@ -114,6 +167,15 @@
           // Markers may have already arrived via WS before config loaded.
           // Re-run effects so the heatmap can draw with the now-known regions.
           runEffects({ type: 'config.loaded' });
+        }
+        // Auto-enable any layers configured in mapwatch.yaml.
+        if (cfg && cfg.layers) {
+          for (const [key, enabled] of Object.entries(cfg.layers)) {
+            if (enabled && layerState[key]) {
+              const btn = document.getElementById('btn-layer-' + key.toLowerCase());
+              _toggleLayer(key, btn);
+            }
+          }
         }
       })
       .catch(() => { /* use defaults */ });
@@ -238,12 +300,14 @@
 
   /**
    * Find which DC (if any) owns this alert.
-   * Matches by alert.labels.datacenter → dcMarkers key.
+   * Checks labels.datacenter and labels.location (in that order) against dcMarkers.
    */
   function getDCForAlert(data) {
-    if (data.labels && data.labels.datacenter) {
-      const name = data.labels.datacenter;
-      if (dcMarkers[name]) return name;
+    for (const key of ['datacenter', 'location']) {
+      if (data.labels && data.labels[key]) {
+        const name = data.labels[key];
+        if (dcMarkers[name]) return name;
+      }
     }
     return null;
   }
@@ -334,7 +398,7 @@
     const sev      = d.severity || 'unknown';
     const color    = severityColor(sev);
     const instance = (d.labels && d.labels.instance) || '';
-    const dc       = (d.labels && d.labels.datacenter) || '';
+    const dc       = (d.labels && (d.labels.datacenter || d.labels.location)) || '';
     const summary  = (d.annotations && d.annotations.summary) || '';
 
     let html = `<div class="mw-tt">
@@ -451,6 +515,134 @@
     ['dark', 'light', 'satellite'].forEach((n) => {
       document.getElementById('btn-' + n).classList.toggle('active', n === name);
     });
+  }
+
+  // ── Map navigation ────────────────────────────────────────────────────────────
+
+  /** Fly back to the default Singapore full-island view. */
+  function resetToSG() {
+    map.fitBounds(SG_BOUNDS, { padding: [20, 20] });
+  }
+
+  /** Set map zoom from slider input. */
+  function setZoom(z) {
+    map.setZoom(parseInt(z, 10));
+  }
+
+  // ── SG overlay layer system ───────────────────────────────────────────────────
+  //
+  // All layers are optional and lazy-loaded on first toggle.
+  // Style helpers are prefixed with _ to distinguish from public API.
+
+  function _styleNPC(_feature) {
+    return { color: '#4fc3f7', weight: 1.5, opacity: 0.8, fillColor: '#4fc3f7', fillOpacity: 0.06 };
+  }
+
+  function _onEachNPC(feature, layer) {
+    const p = feature.properties || {};
+    const name = p.NPC_NAME || p.Name || p.name || '';
+    const div  = p.DIVISION  || p.Division  || '';
+    if (name) {
+      layer.bindTooltip(
+        `<div class="mw-tt-title">${e(name)}</div>` +
+        (div ? `<div class="mw-tt-row">Division: ${e(div)}</div>` : ''),
+        { sticky: true, className: 'mw-tooltip', opacity: 1 }
+      );
+    }
+  }
+
+  function _styleRoads(feature) {
+    const hw = (feature.properties && feature.properties.highway) || '';
+    const weight = /motorway|trunk/.test(hw) ? 3 : 2;
+    return { color: '#f97316', weight, opacity: 0.65, fillOpacity: 0 };
+  }
+
+  function _styleCycling(_feature) {
+    return { color: '#4ade80', weight: 2, opacity: 0.8, fillOpacity: 0, dashArray: '6,4' };
+  }
+
+  function _styleMRT(_feature) {
+    return { color: '#e11d48', weight: 3, opacity: 0.9, fillOpacity: 0 };
+  }
+
+  function _onEachMRT(feature, layer) {
+    const p = feature.properties || {};
+    const name = p.name || p.ref || '';
+    if (name) {
+      layer.bindTooltip(`<div class="mw-tt-title">${e(name)}</div>`,
+        { sticky: true, className: 'mw-tooltip', opacity: 1 });
+    }
+  }
+
+  function _onEachBusStop(feature, layer) {
+    const p = feature.properties || {};
+    if (p.name || p.code) {
+      layer.bindTooltip(
+        `<div class="mw-tt-title">${e(p.name || p.code)}</div>` +
+        (p.road ? `<div class="mw-tt-row">${e(p.road)}</div>` : '') +
+        (p.code ? `<div class="mw-tt-row">Stop: ${e(p.code)}</div>` : ''),
+        { sticky: true, className: 'mw-tooltip', opacity: 1 }
+      );
+    }
+  }
+
+  function _styleBusRoutes(_feature) {
+    return { color: '#60a5fa', weight: 1, opacity: 0.45, fillOpacity: 0 };
+  }
+
+  function _onEachBusRoute(feature, layer) {
+    const p = feature.properties || {};
+    if (p.service) {
+      layer.bindTooltip(
+        `<div class="mw-tt-title">Bus ${e(p.service)}</div>` +
+        (p.operator  ? `<div class="mw-tt-row">${e(p.operator)}</div>` : '') +
+        (p.direction ? `<div class="mw-tt-row">Dir ${e(p.direction)}</div>` : ''),
+        { sticky: true, className: 'mw-tooltip', opacity: 1 }
+      );
+    }
+  }
+
+  /**
+   * Generic layer toggle factory.
+   * Lazy-fetches /api/geojson/{def.file} on first call, then just shows/hides.
+   */
+  function _toggleLayer(key, btn) {
+    const state = layerState[key];
+    const def   = LAYER_DEFS[key];
+    if (!state || !def || state.loading) return;
+
+    if (state.layer) {
+      state.visible = !state.visible;
+      if (state.visible) { state.layer.addTo(map); btn && btn.classList.add('active'); }
+      else               { state.layer.remove();   btn && btn.classList.remove('active'); }
+      return;
+    }
+
+    state.loading = true;
+    const origText = btn && btn.textContent;
+    if (btn) btn.textContent = 'Loading…';
+
+    fetch('/api/geojson/' + def.file)
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then(geojson => {
+        state.layer   = L.geoJSON(geojson, def.options).addTo(map);
+        state.visible = true;
+        state.loading = false;
+        if (btn) { btn.textContent = origText; btn.classList.add('active'); }
+      })
+      .catch(err => {
+        state.loading = false;
+        if (btn) btn.textContent = origText;
+        console.error(key + ' layer load failed:', err);
+        alert(
+          `Could not load "${def.file}" data.\n` +
+          `Run first:  mapwatch download-sg-${def.cmd}\n\n` +
+          `(This layer is optional — MapWatch works without it.)`
+        );
+      });
   }
 
   // ── Side panel ────────────────────────────────────────────────────────────────
@@ -574,7 +766,7 @@
       <span class="severity-badge ${badgeClass}">${sev}</span>
 
       <div class="meta-row"><strong>Instance:</strong> ${e(m.labels && m.labels.instance || '—')}</div>
-      <div class="meta-row"><strong>Datacenter:</strong> ${e(m.labels && m.labels.datacenter || '—')}</div>
+      <div class="meta-row"><strong>Location:</strong> ${e(m.labels && (m.labels.location || m.labels.datacenter) || '—')}</div>
       <div class="meta-row"><strong>Duration:</strong> ${e(dur)}</div>
       ${m.annotations && m.annotations.summary ? `<div class="meta-row"><strong>Summary:</strong> ${e(m.annotations.summary)}</div>` : ''}
       ${m.annotations && m.annotations.description ? `<div class="meta-row"><strong>Description:</strong> ${e(m.annotations.description)}</div>` : ''}
@@ -647,74 +839,6 @@
       .replace(/"/g, '&quot;');
   }
 
-  // ── SG NPC Boundary overlay ───────────────────────────────────────────────────
-
-  function styleNPCFeature(_feature) {
-    return {
-      color:       '#4fc3f7',
-      weight:      1.5,
-      opacity:     0.8,
-      fillColor:   '#4fc3f7',
-      fillOpacity: 0.06,
-    };
-  }
-
-  function onEachNPCFeature(feature, layer) {
-    const p = feature.properties || {};
-    const name = p.NPC_NAME || p.Name || p.name || '';
-    const div  = p.DIVISION  || p.Division  || '';
-    if (name) {
-      layer.bindTooltip(
-        `<div class="mw-tt-title">${e(name)}</div>` +
-        (div ? `<div class="mw-tt-row">Division: ${e(div)}</div>` : ''),
-        { sticky: true, className: 'mw-tooltip', opacity: 1 }
-      );
-    }
-  }
-
-  function toggleNPCZones(btn) {
-    if (npcLoading) return;
-
-    // If already loaded, just toggle visibility.
-    if (npcLayer) {
-      npcVisible = !npcVisible;
-      if (npcVisible) {
-        npcLayer.addTo(map);
-        btn && btn.classList.add('active');
-      } else {
-        npcLayer.remove();
-        btn && btn.classList.remove('active');
-      }
-      return;
-    }
-
-    // First call — fetch and build the layer.
-    npcLoading = true;
-    btn && (btn.textContent = 'Loading…');
-
-    fetch('/api/geojson/sg-npc-boundary')
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then(geojson => {
-        npcLayer = L.geoJSON(geojson, {
-          style:          styleNPCFeature,
-          onEachFeature:  onEachNPCFeature,
-        }).addTo(map);
-        npcVisible = true;
-        npcLoading = false;
-        btn && (btn.textContent = 'NPC Zones');
-        btn && btn.classList.add('active');
-      })
-      .catch(err => {
-        npcLoading = false;
-        btn && (btn.textContent = 'NPC Zones');
-        console.error('NPC zones load failed:', err);
-        alert('Could not load NPC boundary data.\nRun: mapwatch download-sg');
-      });
-  }
-
   // ── Public API ────────────────────────────────────────────────────────────────
 
   window.MapWatch = {
@@ -723,7 +847,10 @@
     openPanel,
     openDCPanel,
     closePanel,
-    toggleNPCZones,
+    resetToSG,
+    setZoom,
+    // Layer toggles — each wired to its toolbar button via onclick.
+    toggleLayer: _toggleLayer,
     // Heatmap region definitions — populated from /api/config by fetchConfig();
     // read by heatmap.js on every effect invocation.
     heatmapRegions: [],

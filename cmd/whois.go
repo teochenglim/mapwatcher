@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/teochenglim/mapwatch/internal/geo"
+	sgapi "github.com/teochenglim/mapwatch/internal/geo/sg"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +40,7 @@ var whoisCmd = &cobra.Command{
 		}
 
 		geojsonPath := whoisDataDir + "/sg-npc-boundary.geojson"
-		info, err := geo.PointToNPC(lat, lng, geojsonPath)
+		info, err := sgapi.PointToNPC(lat, lng, geojsonPath)
 		if err != nil {
 			return err
 		}
