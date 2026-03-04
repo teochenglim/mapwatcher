@@ -792,8 +792,11 @@
         if (!hit || !sublayer.feature) return;
 
         const p = sublayer.feature.properties || {};
-        // Skip division features that have no DIVISION assignment (sea/marine sectors).
-        if (key === 'division' && !p.DIVISION && !p.Division) return;
+        // Skip sea/marine sectors (S-Sect, M-Sect) — only keep land NPC divisions.
+        if (key === 'division') {
+          const div = p.DIVISION || p.Division || '';
+          if (!div || div.includes('Sect')) return;
+        }
 
         hits.push({ props: p, sublayer });
         if (typeof sublayer.setStyle === 'function') {
