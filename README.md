@@ -57,8 +57,8 @@ The repo ships with always-firing demo alerts so you can see blinking markers im
 ### Step 1 — Start the stack
 
 ```bash
-git clone https://github.com/teochenglim/mapwatch.git
-cd mapwatch
+git clone https://github.com/teochenglim/mapwatcher.git
+cd mapwatcher
 docker compose up --build
 ```
 
