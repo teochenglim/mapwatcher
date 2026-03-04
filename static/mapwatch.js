@@ -49,6 +49,12 @@
   // DC baseline markers: name → { leafletMarker, alerts: {alertId→data}, lat, lng }
   let dcMarkers = {};
 
+  // ── Spatial selection state ───────────────────────────────────────────────────
+  let selectionMode      = false;
+  let selectStart        = null;   // L.LatLng where drag began
+  let selectRect         = null;   // L.Rectangle shown while dragging
+  let selectedSubLayers  = [];     // [{ sublayer, key }] — for color restoration
+
   // ── SG Overlay layers (all lazy-loaded, all off by default) ──────────────────
   // Each entry: { layer, visible, loading }
 
@@ -130,10 +136,18 @@
     clusterGroup = L.markerClusterGroup({ chunkedLoading: true, zoomToBoundsOnClick: false });
     clusterGroup.addTo(map);
 
-    // Keyboard shortcut: Esc closes panel.
+    // Keyboard shortcut: Esc cancels selection or closes panel.
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') MapWatch.closePanel();
+      if (e.key === 'Escape') {
+        if (selectionMode) _disableSelect();
+        else MapWatch.closePanel();
+      }
     });
+
+    // Drag-to-select map events.
+    map.on('mousedown', _onSelectMouseDown);
+    map.on('mousemove', _onSelectMouseMove);
+    map.on('mouseup',   _onSelectMouseUp);
 
     // Mouse coordinate display (bottom-left corner).
     const coordEl = document.getElementById('map-coords');
@@ -196,7 +210,7 @@
       lm.bindTooltip(makeDCTooltipHtml(loc.name, {}), {
         permanent: false, direction: 'top', className: 'mw-tooltip', opacity: 1,
       });
-      lm.on('click', () => MapWatch.openDCPanel(loc.name));
+      lm.on('click', () => { if (!selectionMode) MapWatch.openDCPanel(loc.name); });
       dcMarkers[loc.name] = { leafletMarker: lm, alerts: {}, lat: loc.lat, lng: loc.lng };
       lm.addTo(map);   // DC markers live directly on the map, not in cluster/spread
     }
@@ -453,7 +467,7 @@
       lm.bindTooltip(makeTooltipHtml(data), {
         permanent: false, direction: 'top', className: 'mw-tooltip', opacity: 1,
       });
-      lm.on('click', () => MapWatch.openPanel(data.id));
+      lm.on('click', () => { if (!selectionMode) MapWatch.openPanel(data.id); });
 
       markerMap[data.id] = { leafletMarker: lm, data };
       addToActiveLayer(lm);
@@ -643,6 +657,258 @@
           `(This layer is optional — MapWatch works without it.)`
         );
       });
+  }
+
+  // ── Drag-to-select (spatial query) ───────────────────────────────────────────
+  //
+  // Generic rectangle selection over ALL currently-visible GeoJSON layers.
+  // Works with any layer in layerState: bus stops, bus routes, MRT, roads, etc.
+
+  const _SELECT_HIGHLIGHT = '#22d3ee';   // cyan — selection highlight colour
+  const _SELECT_ORIG_STYLES = {          // per-layer default styles for restoration
+    busStops:  { fillColor: '#f59e0b', color: '#f59e0b', weight: 1, opacity: 0.8, fillOpacity: 0.6 },
+    busRoutes: { color: '#60a5fa', weight: 1, opacity: 0.45 },
+    roads:     { color: '#f97316', opacity: 0.65 },
+    cycling:   { color: '#4ade80', opacity: 0.8 },
+    mrt:       { color: '#e11d48', opacity: 0.9 },
+    division:  { color: '#4fc3f7', opacity: 0.8, fillOpacity: 0.06 },
+  };
+
+  const _LAYER_LABELS = {
+    division:  'Divisions',
+    roads:     'Roads',
+    cycling:   'Cycling Paths',
+    mrt:       'MRT Lines',
+    busStops:  'Bus Stops',
+    busRoutes: 'Bus Routes',
+  };
+
+  function toggleSelectionMode() {
+    if (selectionMode) _disableSelect();
+    else               _enableSelect();
+  }
+
+  function _enableSelect() {
+    selectionMode = true;
+    map.dragging.disable();
+    map.getContainer().style.cursor = 'crosshair';
+    const btn = document.getElementById('btn-select');
+    if (btn) btn.classList.add('active');
+  }
+
+  function _disableSelect() {
+    selectionMode = false;
+    map.dragging.enable();
+    map.getContainer().style.cursor = '';
+    const btn = document.getElementById('btn-select');
+    if (btn) btn.classList.remove('active');
+    if (selectRect) { map.removeLayer(selectRect); selectRect = null; }
+    selectStart = null;
+    _clearSelectionHighlights();
+    _hideSelectPanel();
+  }
+
+  function _clearSelectionHighlights() {
+    const orig = _SELECT_ORIG_STYLES;
+    for (const { sublayer, key } of selectedSubLayers) {
+      if (typeof sublayer.setStyle === 'function') {
+        sublayer.setStyle(orig[key] || {});
+      }
+    }
+    selectedSubLayers = [];
+  }
+
+  function _onSelectMouseDown(e) {
+    if (!selectionMode) return;
+    if (e.originalEvent && e.originalEvent.button !== 0) return;
+    selectStart = e.latlng;
+    if (selectRect) { map.removeLayer(selectRect); selectRect = null; }
+  }
+
+  function _onSelectMouseMove(e) {
+    if (!selectionMode || !selectStart) return;
+    const bounds = L.latLngBounds(selectStart, e.latlng);
+    if (selectRect) {
+      selectRect.setBounds(bounds);
+    } else {
+      selectRect = L.rectangle(bounds, {
+        color: _SELECT_HIGHLIGHT, weight: 1.5, fillOpacity: 0.08,
+        dashArray: '5,5', interactive: false,
+      }).addTo(map);
+    }
+  }
+
+  function _onSelectMouseUp(e) {
+    if (!selectionMode || !selectStart) return;
+    const bounds = L.latLngBounds(selectStart, e.latlng);
+    if (selectRect) { map.removeLayer(selectRect); selectRect = null; }
+    selectStart = null;
+    _clearSelectionHighlights();
+    _queryAndShow(bounds);
+  }
+
+  /**
+   * Flatten a GeoJSON geometry into an array of [lng, lat] coordinate pairs.
+   * Handles Point, LineString, MultiLineString, Polygon, MultiPolygon.
+   */
+  function _flatCoords(geom) {
+    switch (geom.type) {
+      case 'Point':           return [geom.coordinates];
+      case 'LineString':      return geom.coordinates;
+      case 'MultiLineString': return geom.coordinates.flat();
+      case 'Polygon':         return geom.coordinates.flat();
+      case 'MultiPolygon':    return geom.coordinates.flat(2);
+      default:                return [];
+    }
+  }
+
+  /**
+   * Returns true if any vertex of the geometry falls within the L.LatLngBounds.
+   * Used for line/polygon features so that bounding-box false positives are avoided.
+   */
+  function _geomHitsBounds(geom, bounds) {
+    return _flatCoords(geom).some(([lng, lat]) => bounds.contains([lat, lng]));
+  }
+
+  /**
+   * Query ALL visible GeoJSON layers for features within bounds,
+   * highlight the matching sublayers, and show the bottom panel.
+   * Also queries always-visible blink-dots and (if on) heatmap regions.
+   */
+  function _queryAndShow(bounds) {
+    const groups = {};   // key → [{ name, sub? }]
+
+    // ── GeoJSON overlay layers ────────────────────────────────────────────────
+    for (const [key, state] of Object.entries(layerState)) {
+      if (!state.visible || !state.layer) continue;
+      const hits = [];
+      state.layer.eachLayer(sublayer => {
+        let hit = false;
+        if (typeof sublayer.getLatLng === 'function') {
+          hit = bounds.contains(sublayer.getLatLng());
+        } else if (sublayer.feature && sublayer.feature.geometry) {
+          hit = _geomHitsBounds(sublayer.feature.geometry, bounds);
+        }
+        if (!hit || !sublayer.feature) return;
+
+        const p = sublayer.feature.properties || {};
+        // Skip division features that have no DIVISION assignment (sea/marine sectors).
+        if (key === 'division' && !p.DIVISION && !p.Division) return;
+
+        hits.push({ props: p, sublayer });
+        if (typeof sublayer.setStyle === 'function') {
+          sublayer.setStyle({ color: _SELECT_HIGHLIGHT, fillColor: _SELECT_HIGHLIGHT, weight: 2, opacity: 1, fillOpacity: 0.75 });
+        }
+        selectedSubLayers.push({ sublayer, key });
+      });
+      if (hits.length) groups[key] = hits;
+    }
+
+    // ── DC baseline markers (always visible) ─────────────────────────────────
+    const dcHits = [];
+    for (const [name, dc] of Object.entries(dcMarkers)) {
+      if (!bounds.contains([dc.lat, dc.lng])) continue;
+      const alertCount = Object.keys(dc.alerts).length;
+      const worst      = alertCount > 0 ? worstSeverityOf(Object.values(dc.alerts)) : null;
+      dcHits.push({ name, alertCount, worst });
+    }
+    if (dcHits.length) groups['_dc'] = dcHits;
+
+    // ── Individual alert markers (always visible) ─────────────────────────────
+    const alertHits = [];
+    for (const [, entry] of Object.entries(markerMap)) {
+      if (!entry.leafletMarker) continue;   // DC-owned alerts have no individual marker
+      if (!bounds.contains(entry.leafletMarker.getLatLng())) continue;
+      alertHits.push({ data: entry.data });
+    }
+    if (alertHits.length) groups['_alerts'] = alertHits;
+
+    // ── Heatmap regions (only when heatmap is toggled on) ─────────────────────
+    const heatBtn = document.getElementById('btn-heatmap');
+    if (heatBtn && heatBtn.classList.contains('active') && heatmapRegions.length) {
+      const regionHits = [];
+      for (const region of heatmapRegions) {
+        if (!region.bounds) continue;
+        const rb = L.latLngBounds(region.bounds[0], region.bounds[1]);
+        if (bounds.intersects(rb)) regionHits.push({ region });
+      }
+      if (regionHits.length) groups['_heatmap'] = regionHits;
+    }
+
+    _showSelectPanel(groups);
+  }
+
+  function _showSelectPanel(groups) {
+    const total = Object.values(groups).reduce((s, a) => s + a.length, 0);
+    const titleEl   = document.getElementById('select-panel-title');
+    const contentEl = document.getElementById('select-panel-content');
+    if (!titleEl || !contentEl) return;
+
+    titleEl.textContent = total > 0
+      ? `${total} feature${total !== 1 ? 's' : ''} selected`
+      : 'No features in selection';
+
+    if (total === 0) {
+      contentEl.innerHTML = '';
+      document.getElementById('select-panel').classList.add('open');
+      return;
+    }
+
+    let html = '';
+    for (const [key, hits] of Object.entries(groups)) {
+      let label, chips;
+
+      if (key === '_dc') {
+        label = 'Locations';
+        chips = hits.map(({ name, alertCount, worst }) => {
+          const col = alertCount > 0 ? severityColor(worst) : '#3fb950';
+          const sub = alertCount > 0 ? `${alertCount} alert${alertCount !== 1 ? 's' : ''} · ${worst}` : 'healthy';
+          return `<div class="sel-chip">` +
+                   `<span class="sel-chip-name">${e(name)}</span>` +
+                   `<span class="sel-chip-sub" style="color:${col}">${e(sub)}</span>` +
+                 `</div>`;
+        }).join('');
+
+      } else if (key === '_alerts') {
+        label = 'Alerts';
+        chips = hits.map(({ data: d }) => {
+          const sev = d.severity || 'unknown';
+          return `<div class="sel-chip">` +
+                   `<span class="sel-chip-name">${e(d.alertname || d.id)}</span>` +
+                   `<span class="sel-chip-sub" style="color:${severityColor(sev)}">${e(sev)}</span>` +
+                 `</div>`;
+        }).join('');
+
+      } else if (key === '_heatmap') {
+        label = 'Heatmap Regions';
+        chips = hits.map(({ region }) =>
+          `<div class="sel-chip"><span class="sel-chip-name">${e(region.name)}</span></div>`
+        ).join('');
+
+      } else {
+        label = _LAYER_LABELS[key] || key;
+        chips = hits.map(({ props: p }) => {
+          const name = p.name || p.NPC_NAME || p.Name || p.code || p.service || p.ref || '—';
+          const sub  = p.road || p.operator || p.DIVISION || p.Division || '';
+          return `<div class="sel-chip">` +
+                   `<span class="sel-chip-name">${e(name)}</span>` +
+                   (sub ? `<span class="sel-chip-sub">${e(sub)}</span>` : '') +
+                 `</div>`;
+        }).join('');
+      }
+
+      html += `<div class="sel-group">` +
+                `<div class="sel-group-label">${e(label)} <span class="sel-group-count">${hits.length}</span></div>` +
+                `<div class="sel-chips">${chips}</div>` +
+              `</div>`;
+    }
+    contentEl.innerHTML = html;
+    document.getElementById('select-panel').classList.add('open');
+  }
+
+  function _hideSelectPanel() {
+    const panel = document.getElementById('select-panel');
+    if (panel) panel.classList.remove('open');
   }
 
   // ── Side panel ────────────────────────────────────────────────────────────────
@@ -851,6 +1117,8 @@
     setZoom,
     // Layer toggles — each wired to its toolbar button via onclick.
     toggleLayer: _toggleLayer,
+    // Drag-to-select toggle.
+    toggleSelect: toggleSelectionMode,
     // Heatmap region definitions — populated from /api/config by fetchConfig();
     // read by heatmap.js on every effect invocation.
     heatmapRegions: [],

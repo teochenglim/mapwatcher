@@ -67,6 +67,11 @@
     .tb-btn:hover  { background: #21262d; border-color: #58a6ff; }
     .tb-btn.active { background: #1f6feb; border-color: #1f6feb; }
 
+    /* Select button — distinct teal colour */
+    .tb-btn-select              { border-color: #22d3ee; color: #22d3ee; }
+    .tb-btn-select:hover        { background: #0e3a3f; border-color: #22d3ee; }
+    .tb-btn-select.active       { background: #164e5a; border-color: #22d3ee; color: #22d3ee; }
+
     /* ── Status dot ── */
     #ws-status {
       width: 8px; height: 8px;
@@ -329,6 +334,101 @@
     .dc-alert-summary { font-size: 11px; color: #6e7681; margin-top: 2px;
                         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .dc-alert-arrow  { color: #8b949e; font-size: 12px; flex-shrink: 0; margin-top: 2px; }
+
+    /* ── Drag-to-select bottom panel ── */
+    #select-panel {
+      position: absolute;
+      bottom: -260px;
+      left: 0; right: 0;
+      max-height: 260px;
+      z-index: 1050;
+      background: rgba(13,17,23,.95);
+      border-top: 1px solid #30363d;
+      display: flex;
+      flex-direction: column;
+      transition: bottom .25s ease;
+      backdrop-filter: blur(6px);
+    }
+    #select-panel.open { bottom: 0; }
+
+    #select-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      border-bottom: 1px solid #30363d;
+      flex-shrink: 0;
+    }
+    #select-panel-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #22d3ee;
+    }
+    #select-panel-close {
+      background: none;
+      border: none;
+      color: #8b949e;
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+      padding: 2px 6px;
+    }
+    #select-panel-close:hover { color: #e6edf3; }
+
+    #select-panel-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px 14px;
+    }
+
+    .sel-group { margin-bottom: 10px; }
+    .sel-group-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: #8b949e;
+      margin-bottom: 6px;
+    }
+    .sel-group-count {
+      display: inline-block;
+      background: #22d3ee22;
+      color: #22d3ee;
+      border-radius: 8px;
+      padding: 0 6px;
+      font-size: 10px;
+      font-weight: 700;
+      margin-left: 4px;
+    }
+    .sel-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .sel-chip {
+      display: flex;
+      flex-direction: column;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 5px;
+      padding: 4px 8px;
+      font-size: 12px;
+      min-width: 80px;
+      max-width: 180px;
+    }
+    .sel-chip-name {
+      color: #e6edf3;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .sel-chip-sub {
+      color: #8b949e;
+      font-size: 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
   </style>
 </head>
 <body>
@@ -371,6 +471,13 @@
             onclick="MapWatch.toggleLayer('busStops',this)">Bus Stops</button>
     <button class="tb-btn" id="btn-layer-busroutes"
             onclick="MapWatch.toggleLayer('busRoutes',this)">Bus Routes</button>
+
+    <div class="tb-sep"></div>
+
+    <!-- Drag-to-select -->
+    <button class="tb-btn tb-btn-select" id="btn-select"
+            onclick="MapWatch.toggleSelect()"
+            title="Drag to select features from all visible layers">Select</button>
   </div>
 
   <!-- Mouse coordinate display -->
@@ -384,6 +491,17 @@
     </div>
     <div id="panel-body">
       <div id="panel-content"></div>
+    </div>
+  </div>
+
+  <!-- Drag-to-select bottom panel -->
+  <div id="select-panel">
+    <div id="select-panel-header">
+      <span id="select-panel-title">0 features selected</span>
+      <button id="select-panel-close" onclick="MapWatch.toggleSelect()" title="Clear selection">&times;</button>
+    </div>
+    <div id="select-panel-body">
+      <div id="select-panel-content"></div>
     </div>
   </div>
 

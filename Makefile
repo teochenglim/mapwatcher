@@ -6,7 +6,7 @@ LDFLAGS   := -s -w
 VERSION   := $(strip $(shell cat VERSION))
 
 .PHONY: all build run test test-verbose lint tidy docker-build docker-push \
-        tag release clean help
+        tag release demo clean help
 
 all: build
 
@@ -35,6 +35,11 @@ lint:
 tidy:
 	$(GO) mod tidy
 	$(GO) mod verify
+
+## demo: run full stack using Dockerfile-local (no GeoJSON downloads)
+demo:
+	docker compose -f docker-compose.yml -f docker-compose-local.yml up --build
+	@echo "→ MapWatch demo running at http://localhost:8080"
 
 ## docker-build: build Docker image tagged with VERSION and latest
 docker-build:

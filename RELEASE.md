@@ -1,5 +1,53 @@
 # MapWatch Release Notes
 
+## v0.5.0
+
+**Drag-to-select spatial query**
+
+### New feature — rectangle selection across all visible layers
+
+A teal **Select** button in the toolbar activates a spatial selection mode.
+Click and drag on the map to draw a rectangle; all features from every currently-visible
+GeoJSON layer that fall within the rectangle are highlighted in cyan and listed in a
+bottom panel grouped by layer type.
+
+**Works generically with any combination of active layers:**
+
+| Layer | Feature type | Hit test |
+|-------|-------------|----------|
+| Bus Stops | Point (circle marker) | Point inside rect |
+| Bus Routes | LineString | Any route vertex inside rect |
+| MRT Lines | LineString | Any line vertex inside rect |
+| Roads | LineString | Any segment vertex inside rect |
+| Cycling Paths | LineString | Any path vertex inside rect |
+| Divisions (NPC) | Polygon | Any polygon vertex inside rect |
+
+**Key behaviours:**
+
+- Cursor changes to crosshair while Select is active; map pan is disabled during drag
+- Dashed cyan rectangle previewed in real time as you drag
+- On release: matched features highlight cyan; original colours restored when Select is deactivated
+- Results appear in a bottom panel that slides up; dismisses on **Esc** or clicking **Select** again
+- DC baseline markers and alert dot clicks are suppressed while Select is active (they resume on deactivation)
+- Polygon/line features use a **vertex-level hit test** (not bounding-box) — large polygons like division boundaries are only selected when the drag rectangle physically overlaps their actual geometry
+
+### Bug fixes
+
+- Division polygons no longer selected by bounding-box proximity — replaced `bounds.intersects(layer.getBounds())` with `_geomHitsBounds` which checks that at least one polygon vertex falls inside the drawn rectangle
+- Sea / marine sectors excluded from division selection results — NPC boundary GeoJSON includes offshore `M-Sect` features with no `DIVISION` property; these are now filtered out at query time
+
+### Extended selection sources
+
+- **DC baseline markers always included** — green breathing dots (and alert-firing dots) are queried regardless of any layer toggle; result chips show DC name, alert count, and worst severity
+- **Individual alert markers always included** — every visible blinking/coloured alert dot in `markerMap` is tested against the selection bounds; result chips show alertname and severity
+- **Heatmap regions conditionally included** — when the Heatmap toolbar button is active, heatmap rectangles that intersect the drawn selection are listed as a separate group in the results panel
+
+### Documentation
+
+- [SELECTION.md](SELECTION.md) — full reference: code walkthrough, geometry hit-test rationale, WebSocket integration diagram (updated to reflect alert/DC marker inclusion), extension guide
+
+---
+
 ## v0.4.0
 
 **Singapore transport & infrastructure overlays + map navigation controls**

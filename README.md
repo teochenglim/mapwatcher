@@ -27,6 +27,7 @@ point Alertmanager at MapWatch, and your infrastructure lights up on the map in 
 - **Critical alerts blink** — `severity: critical` triggers a CSS pulse animation automatically
 - **Click-to-Prometheus** — click any dot to open the matching PromQL query in Prometheus
 - **Choropleth heatmap** — rectangular region overlays coloured by severity; shown by default, empty regions as grey outlines; toggle off via toolbar
+- **Drag-to-select spatial query** — click the teal **Select** button, drag a rectangle; DC baseline markers and individual alert markers are always included; GeoJSON overlay layers (bus stops, routes, MRT, roads, cycling, divisions) are included when toggled on; heatmap regions are included when the Heatmap button is active; results highlight in cyan and list in a bottom panel grouped by source; sea/marine sectors are automatically excluded from division results
 - **Mouse coordinate display** — hover anywhere on the map to see live `lat, lng` (for tuning region bounds)
 - **Single binary, zero deps** — static assets embedded via `go:embed`; runs anywhere Go runs
 
@@ -545,6 +546,8 @@ MapWatch.registerEffect('my-custom-effect', function (event, map, markerMap) {
 });
 ```
 
+See [SELECTION.md](SELECTION.md) for the full drag-to-select reference — code walkthrough, geometry hit-test details, WebSocket integration diagram, and how to extend to new layers.
+
 Built-in effects (in `static/effects/`):
 
 | Effect          | What it does                                                | Example |
@@ -730,14 +733,14 @@ It drives everything — the Go binary embed, Docker image tag, and git tag.
 
 ```bash
 # 1. Bump the version
-echo "v0.4.1" > VERSION
+echo "v0.5.0" > VERSION
 
 # 2. Commit it
-git add . && git commit -m "release v0.4.1"
+git add . 
+git commit -m "release v0.5.0"
 
 # 3. Tag + push — triggers the GitHub Actions release pipeline
 make release
-
 git push origin main
 ```
 
