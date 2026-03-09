@@ -65,8 +65,6 @@ release:
 	fi
 	@VER="v$(v)"; \
 	echo "$$VER" > VERSION; \
-	git add VERSION; \
-	git commit -m "release $$VER"; \
 	git tag -a "$$VER" -m "Release $$VER"; \
 	git push origin main; \
 	git push origin "$$VER"; \

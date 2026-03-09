@@ -732,6 +732,8 @@ It drives everything — the Go binary embed, Docker image tag, and git tag.
 **Workflow:**
 
 ```bash
+git add . \
+git commit -m "release $$VER - awesome feature"
 make release v=0.5.4
 ```
 
