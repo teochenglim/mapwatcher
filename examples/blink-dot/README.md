@@ -25,6 +25,11 @@ docker compose up -d
 docker compose up --build
 ```
 
+> **No map downloads required.**
+> This example uses a minimal `Dockerfile` that ships only the binary.
+> The SG overlay buttons (Divisions, Roads, MRT, etc.) are automatically
+> hidden in the toolbar because the GeoJSON files are not present.
+
 | Service      | URL                     |
 |--------------|-------------------------|
 | MapWatch     | http://localhost:8080   |

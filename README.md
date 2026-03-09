@@ -732,19 +732,10 @@ It drives everything — the Go binary embed, Docker image tag, and git tag.
 **Workflow:**
 
 ```bash
-# 1. Bump the version
-echo "v0.5.3" > VERSION
-
-# 2. Commit it
-git add . 
-git commit -m "release v0.5.3"
-
-# 3. Tag + push — triggers the GitHub Actions release pipeline
-make release
-git push origin main
+make release v=0.5.4
 ```
 
-`make release` reads `VERSION`, creates an annotated git tag, and pushes it.
+That single command bumps `VERSION`, commits, tags, and pushes — triggering the GitHub Actions release pipeline.
 GoReleaser validates that the git tag matches `VERSION` before building binaries.
 
 The release workflow will automatically:

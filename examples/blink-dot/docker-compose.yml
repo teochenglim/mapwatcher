@@ -12,7 +12,9 @@
 
 services:
   mapwatch:
-    build: ../../          # build from repo root Dockerfile (used with --build)
+    build:
+      context: ../../
+      dockerfile: examples/blink-dot/Dockerfile
     image: ghcr.io/teochenglim/mapwatch:latest
     ports:
       - "8080:8080"

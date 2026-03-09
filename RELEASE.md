@@ -1,5 +1,32 @@
 # MapWatch Release Notes
 
+## v0.5.4
+
+**Auto-hide SG overlay buttons when map data is not downloaded**
+
+### Frontend
+
+- SG overlay buttons (Divisions, Roads, Cycling, MRT, Bus Stops, Bus Routes) are now
+  probed with `HEAD` requests on page load and hidden automatically when their GeoJSON
+  file is absent — no click required, no alert popup
+- When a `_toggleLayer` fetch returns 404, the button is hidden silently with a
+  `console.warn` instead of the previous disruptive `alert()`
+
+### blink-dot example
+
+- Added `examples/blink-dot/Dockerfile` — builds binary only, no GeoJSON downloads
+- `docker-compose.yml` updated to use the blink-dot `Dockerfile` so
+  `cd examples/blink-dot && docker compose up --build` works without network access
+  to data.gov.sg or busrouter.sg
+- READMEs updated to document the no-download behaviour
+
+### Release tooling
+
+- `make release v=0.5.4` — single command bumps `VERSION`, commits, tags, and pushes
+  (replaces the previous 4-step manual process)
+
+---
+
 ## v0.5.0
 
 **Drag-to-select spatial query**

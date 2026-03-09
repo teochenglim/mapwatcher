@@ -182,17 +182,37 @@
           // Re-run effects so the heatmap can draw with the now-known regions.
           runEffects({ type: 'config.loaded' });
         }
-        // Auto-enable any layers configured in mapwatch.yaml.
-        if (cfg && cfg.layers) {
-          for (const [key, enabled] of Object.entries(cfg.layers)) {
-            if (enabled && layerState[key]) {
-              const btn = document.getElementById('btn-layer-' + key.toLowerCase());
-              _toggleLayer(key, btn);
+        // Hide buttons for layers whose GeoJSON files are not yet downloaded,
+        // then auto-enable any layers configured in mapwatch.yaml.
+        _probeLayerButtons().then(() => {
+          if (cfg && cfg.layers) {
+            for (const [key, enabled] of Object.entries(cfg.layers)) {
+              if (enabled && layerState[key]) {
+                const btn = document.getElementById('btn-layer-' + key.toLowerCase());
+                if (btn && btn.style.display !== 'none') _toggleLayer(key, btn);
+              }
             }
           }
-        }
+        });
       })
       .catch(() => { /* use defaults */ });
+  }
+
+  /**
+   * HEAD-probe every layer's GeoJSON file. Hide the toolbar button for any
+   * layer that returns 404 (file not downloaded). Runs in parallel.
+   */
+  async function _probeLayerButtons() {
+    await Promise.all(Object.entries(LAYER_DEFS).map(async ([key, def]) => {
+      try {
+        const r = await fetch('/api/geojson/' + def.file, { method: 'HEAD' });
+        if (r.status === 404) {
+          const btn = document.getElementById('btn-layer-' + key.toLowerCase());
+          if (btn) btn.style.display = 'none';
+          console.warn('[MapWatch] ' + def.file + ' not found — run: mapwatch download-sg-' + def.cmd);
+        }
+      } catch { /* network error — leave button visible */ }
+    }));
   }
 
   // ── DC baseline markers ───────────────────────────────────────────────────────
@@ -638,10 +658,18 @@
 
     fetch('/api/geojson/' + def.file)
       .then(r => {
+        if (r.status === 404) {
+          // File not downloaded yet — silently hide the button.
+          state.loading = false;
+          if (btn) btn.style.display = 'none';
+          console.warn('[MapWatch] ' + def.file + ' not found — run: mapwatch download-sg-' + def.cmd);
+          return null;
+        }
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
       .then(geojson => {
+        if (!geojson) return;
         state.layer   = L.geoJSON(geojson, def.options).addTo(map);
         state.visible = true;
         state.loading = false;
@@ -650,12 +678,7 @@
       .catch(err => {
         state.loading = false;
         if (btn) btn.textContent = origText;
-        console.error(key + ' layer load failed:', err);
-        alert(
-          `Could not load "${def.file}" data.\n` +
-          `Run first:  mapwatch download-sg-${def.cmd}\n\n` +
-          `(This layer is optional — MapWatch works without it.)`
-        );
+        console.error('[MapWatch] ' + key + ' layer load failed:', err);
       });
   }
 

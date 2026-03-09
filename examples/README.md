@@ -5,7 +5,7 @@ Every example is independent: `cd` into the folder and run `docker compose up -d
 
 | Example | Port | What it shows |
 |---------|------|---------------|
-| [blink-dot](blink-dot/) | 8080 | 5 green DC dots; 2 turn red — one with 1 alert, one with 2 alerts (badge) |
+| [blink-dot](blink-dot/) | 8080 | 5 green DC dots; 2 turn red — one with 1 alert, one with 2 alerts (badge). No map downloads needed — SG overlay buttons are hidden automatically. |
 
 ---
 
@@ -18,6 +18,9 @@ Within ~15 seconds, Prometheus fires alerts across two DCs:
 - **sg-dc-1 (CBD)** — 1 critical alert → dot turns red and blinks, no badge
 - **sg-dc-2 (West)** — 2 critical alerts → dot turns red with badge **②**
 - **sg-dc-3/4/5** — no alerts → stay green
+
+> No map downloads required. The example uses a dedicated `Dockerfile` with no
+> GeoJSON layer downloads. SG overlay buttons are hidden automatically on page load.
 
 ```bash
 cd blink-dot

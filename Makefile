@@ -56,11 +56,22 @@ tag:
 	git tag -a $(VERSION) -m "Release $(VERSION)"
 	@echo "Push with: make release"
 
-## release: tag + push to GitHub — triggers the Release GitHub Action
-release: tag
-	@echo "Pushing $(VERSION) to GitHub…"
-	git push origin $(VERSION)
-	@echo "GitHub Actions will build and publish ghcr.io/teochenglim/mapwatch:$(VERSION)"
+## release v=<version>: bump VERSION, commit, tag, and push — triggers the Release GitHub Action
+##   e.g.  make release v=0.5.4
+release:
+	@if [ -z "$(v)" ]; then \
+	  echo "Usage: make release v=<version>  (e.g. make release v=0.5.4)"; \
+	  exit 1; \
+	fi
+	@VER="v$(v)"; \
+	echo "$$VER" > VERSION; \
+	git add VERSION; \
+	git commit -m "release $$VER"; \
+	git tag -a "$$VER" -m "Release $$VER"; \
+	git push origin main; \
+	git push origin "$$VER"; \
+	echo ""; \
+	echo "Released $$VER — GitHub Actions will build and publish ghcr.io/teochenglim/mapwatch:$$VER"
 
 ## clean: remove build artifacts
 clean:
