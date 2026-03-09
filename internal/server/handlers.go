@@ -247,6 +247,22 @@ func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Check which GeoJSON data files are present on disk so the frontend can
+	// show or hide layer buttons without doing N parallel HEAD probes.
+	layerFiles := map[string]string{
+		"division":  "sg-npc-boundary",
+		"roads":     "sg-roads",
+		"cycling":   "sg-cycling",
+		"mrt":       "sg-mrt",
+		"busStops":  "sg-bus-stops",
+		"busRoutes": "sg-bus-routes",
+	}
+	availableLayers := make(map[string]bool, len(layerFiles))
+	for key, file := range layerFiles {
+		_, err := os.Stat(filepath.Join(h.dataDir, file+".geojson"))
+		availableLayers[key] = err == nil
+	}
+
 	log.Printf("[config] GET /api/config: locations=%d heatmapRegions=%d prometheusUrl=%s",
 		len(locs), len(regions), h.promExternalURL)
 
@@ -262,6 +278,7 @@ func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {
 			"busStops":  h.layers.BusStops,
 			"busRoutes": h.layers.BusRoutes,
 		},
+		"availableLayers": availableLayers,
 	})
 }
 

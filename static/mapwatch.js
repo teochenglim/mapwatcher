@@ -182,37 +182,24 @@
           // Re-run effects so the heatmap can draw with the now-known regions.
           runEffects({ type: 'config.loaded' });
         }
-        // Hide buttons for layers whose GeoJSON files are not yet downloaded,
-        // then auto-enable any layers configured in mapwatch.yaml.
-        _probeLayerButtons().then(() => {
-          if (cfg && cfg.layers) {
-            for (const [key, enabled] of Object.entries(cfg.layers)) {
-              if (enabled && layerState[key]) {
-                const btn = document.getElementById('btn-layer-' + key.toLowerCase());
-                if (btn && btn.style.display !== 'none') _toggleLayer(key, btn);
-              }
+        // Show or hide layer buttons based on which GeoJSON files exist on disk
+        // (reported by the server in availableLayers — no HEAD probes needed).
+        for (const [key] of Object.entries(LAYER_DEFS)) {
+          const available = cfg.availableLayers && cfg.availableLayers[key];
+          const btn = document.getElementById('btn-layer-' + key.toLowerCase());
+          if (btn) btn.style.display = available ? '' : 'none';
+        }
+        // Auto-enable layers configured in mapwatch.yaml (only if file is present).
+        if (cfg.layers) {
+          for (const [key, enabled] of Object.entries(cfg.layers)) {
+            if (enabled && layerState[key]) {
+              const btn = document.getElementById('btn-layer-' + key.toLowerCase());
+              if (btn && btn.style.display !== 'none') _toggleLayer(key, btn);
             }
           }
-        });
+        }
       })
       .catch(() => { /* use defaults */ });
-  }
-
-  /**
-   * HEAD-probe every layer's GeoJSON file. Hide the toolbar button for any
-   * layer that returns 404 (file not downloaded). Runs in parallel.
-   */
-  async function _probeLayerButtons() {
-    await Promise.all(Object.entries(LAYER_DEFS).map(async ([key, def]) => {
-      try {
-        const r = await fetch('/api/geojson/' + def.file, { method: 'HEAD' });
-        if (r.status === 404) {
-          const btn = document.getElementById('btn-layer-' + key.toLowerCase());
-          if (btn) btn.style.display = 'none';
-          console.warn('[MapWatch] ' + def.file + ' not found — run: mapwatch download-sg-' + def.cmd);
-        }
-      } catch { /* network error — leave button visible */ }
-    }));
   }
 
   // ── DC baseline markers ───────────────────────────────────────────────────────
