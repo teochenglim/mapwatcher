@@ -9,6 +9,17 @@ prometheus:
 spread:
   radius: 0.01
 
+# ── Feature modules (all off by default) ─────────────────────────────────────
+# Enable per-example in their own mapwatch.yaml:
+#   examples/blink-dot/     → sound: true
+#   examples/interactive-demo/ → sound+leaderboard+stats: true
+modules:
+  sound: false
+  leaderboard: false
+  stats: false
+
+# leaderboard_url: http://exporter:8000/leaderboard   # uncomment when running interactive-demo
+
 # ── Baseline locations ────────────────────────────────────────────────────────
 # Each entry renders as a green "healthy" dot on map load.
 # When an alert fires with a matching label value, the dot turns red/yellow.

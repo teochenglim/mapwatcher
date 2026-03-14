@@ -1,0 +1,14 @@
+groups:
+  - name: tap_alerts
+    interval: 2s   # Q5: evaluate every 2s for fast demo response
+    rules:
+      - alert: TapCluster
+        expr: tap_alert_count > 0
+        for: 2s
+        labels:
+          severity:       "{{ $labels.severity }}"
+          geohash:        "{{ $labels.geohash }}"
+          dominant_color: "{{ $labels.dominant_color }}"
+        annotations:
+          summary:     "{{ $value }} taps at {{ $labels.geohash }}"
+          description: "Tappers: {{ $labels.usernames }}"

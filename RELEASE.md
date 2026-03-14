@@ -1,5 +1,102 @@
 # MapWatch Release Notes
 
+## v0.6.0
+
+**Interactive demo — mobile tap, emoji event markers, leaderboard, offline-capable Docker image**
+
+### Interactive demo (`examples/interactive-demo/`)
+
+New end-to-end demo stack: participants tap a map on their phone, events flow through
+**Redpanda → RisingWave → leaderboard exporter → MapWatch** in real time.
+
+Services: `mapwatch`, `redpanda`, `risingwave`, `exporter` (FastAPI leaderboard), `prometheus`, `alertmanager`.
+
+```bash
+cd examples/interactive-demo && docker compose up --build
+# Main map:    http://localhost:8080
+# Mobile tap:  http://localhost:8080/mobile.html  (open on phone)
+```
+
+### New feature — mobile tap page (`/mobile.html`)
+
+Colour-coded tap input for mobile browsers. Participants pick a severity colour, enter
+their name, and tap the Singapore map to place real-time event markers visible to all
+connected clients.
+
+### New API endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/tap` | Receives `{username,color,severity,lat,lng,session_id,timestamp}`; creates a marker and optionally publishes to Kafka (`REDPANDA_BROKERS` env var) |
+| `GET`  | `/api/leaderboard` | Proxies to upstream `leaderboard_url`; returns 503 when not configured |
+| `POST` | `/api/leaderboard/clear` | Proxies clear request to upstream leaderboard |
+
+### New feature — `modules:` config section
+
+Optional frontend modules, all off by default. Enable per-example in their `mapwatch.yaml`:
+
+```yaml
+modules:
+  sound: true        # Web Audio API tones on marker.add
+  leaderboard: true  # live leaderboard sidebar (requires leaderboard_url)
+  stats: true        # tap / alert counter overlay
+```
+
+`GET /api/config` now returns `{"modules":{…},"leaderboardUrl":"…"}`.
+Modules are loaded dynamically via `<script>` injection so the base binary stays lean.
+
+### New feature — emoji event markers (`blink.js` rewrite)
+
+Plain coloured dots replaced with animated emoji incident markers:
+
+| Severity | Emoji | Incident type | Animation |
+|----------|-------|---------------|-----------|
+| critical | 🚗 | Car Accident | spinning dashed ring + shake |
+| high / warning | 🔥 | Building Fire | rapid opacity flicker |
+| medium | 🚧 | Road Congestion | bounce |
+| low | 🌳 | Fallen Tree | slow sway |
+| info | 💧 | Flash Flood | expanding ripple ring |
+| test | 🚨 | Suspicious Activity | strobe flash |
+| debug | 👁️ | General Sighting | static |
+
+Cluster icons show the **worst-severity emoji** in the group so the most critical
+incident is immediately visible without expanding the cluster.
+
+### New feature — `clearMap()` public API
+
+`MapWatch.clearMap()` removes all markers from the map and resets DC alert counts.
+Accessible via the new **Clear map** toolbar button.
+
+### New feature — tap marker expiry
+
+Tap markers (`source=tap`) auto-expire after **30 seconds**. A server-side goroutine
+scans every 5 s and broadcasts `marker.remove` for expired taps, keeping
+`recomputeOffsets` fast under sustained tap load.
+
+### Bug fix — sound not playing after many taps
+
+`AudioContext.resume()` is async. Previously, beeps were scheduled immediately at
+`ctx.currentTime + 0.01` before the context actually resumed (e.g. after a background
+tab comes back), so those timestamps were already in the past. Fixed by scheduling
+beeps inside the `.then()` callback of `ctx.resume()`.
+
+### Offline-capable Docker image
+
+Leaflet CSS/JS and WAV notification sounds are now **bundled into the Docker image**
+at build time — no CDN required at runtime.
+
+- `scripts/download-vendor.sh` — downloads Leaflet + MarkerCluster assets to `static/vendor/`
+- `scripts/generate-sounds.py` — generates all 7 severity WAV files using Python stdlib (no deps)
+- `index.html` falls back to unpkg CDN automatically when vendor files are absent (local dev)
+
+### docker-compose.yml simplified
+
+Root `docker-compose.yml` is now a minimal baseline (mapwatch + prometheus + alertmanager,
+all modules off). Each example ships its own compose file. `docker-compose-local.yml`
+removed — the main `Dockerfile` handles both vendor download and sound generation.
+
+---
+
 ## v0.5.4
 
 **Auto-hide SG overlay buttons when map data is not downloaded**

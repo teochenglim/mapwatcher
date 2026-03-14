@@ -133,7 +133,30 @@
       maxZoom: 19,
     }).addTo(map);
 
-    clusterGroup = L.markerClusterGroup({ chunkedLoading: true, zoomToBoundsOnClick: false });
+    clusterGroup = L.markerClusterGroup({
+      chunkedLoading: true,
+      zoomToBoundsOnClick: false,
+      iconCreateFunction(cluster) {
+        // Severity order: worst → best
+        const SEV_ORDER = ['critical','warning','high','medium','low','info','test','debug','unknown'];
+        let worstIdx = SEV_ORDER.length - 1;
+        for (const m of cluster.getAllChildMarkers()) {
+          const idx = SEV_ORDER.indexOf(m._mwSev || 'unknown');
+          if (idx !== -1 && idx < worstIdx) worstIdx = idx;
+        }
+        const sev = SEV_ORDER[worstIdx];
+        const ev  = (window.MW_EVENTS && window.MW_EVENTS[sev]) || { emoji: '⚠️', color: '#8b949e', bg: 'rgba(139,148,158,0.15)' };
+        const n   = cluster.getChildCount();
+        const html =
+          `<div style="width:40px;height:40px;border-radius:50%;` +
+          `display:flex;flex-direction:column;align-items:center;justify-content:center;` +
+          `background:${ev.bg};border:2px solid ${ev.color};gap:1px">` +
+            `<span style="font-size:15px;line-height:1">${ev.emoji}</span>` +
+            `<span style="font-size:9px;font-weight:700;color:${ev.color};line-height:1">${n}</span>` +
+          `</div>`;
+        return L.divIcon({ className: '', html, iconSize: [40, 40], iconAnchor: [20, 20] });
+      },
+    });
     clusterGroup.addTo(map);
 
     // Keyboard shortcut: Esc cancels selection or closes panel.
@@ -1120,6 +1143,13 @@
 
   // ── Public API ────────────────────────────────────────────────────────────────
 
+  function clearMap() {
+    const ids = Object.keys(markerMap);
+    for (const id of ids) removeMarker(id);
+    // Reset DC alert counts after clearing all markers.
+    for (const name of Object.keys(dcMarkers)) updateDCMarker(name);
+  }
+
   window.MapWatch = {
     registerEffect,
     setTheme,
@@ -1128,6 +1158,7 @@
     closePanel,
     resetToSG,
     setZoom,
+    clearMap,
     // Layer toggles — each wired to its toolbar button via onclick.
     toggleLayer: _toggleLayer,
     // Drag-to-select toggle.

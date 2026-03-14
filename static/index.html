@@ -5,14 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MapWatch</title>
 
-  <!-- Leaflet -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Leaflet CSS — /vendor/ in Docker (embedded); CDN fallback for local dev -->
+  <link rel="stylesheet" href="/vendor/leaflet.css"
+        onerror="this.onerror=null;this.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'" />
+  <link rel="stylesheet" href="/vendor/MarkerCluster.css"
+        onerror="this.onerror=null;this.href='https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css'" />
+  <link rel="stylesheet" href="/vendor/MarkerCluster.Default.css"
+        onerror="this.onerror=null;this.href='https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css'" />
 
-  <!-- Leaflet.markercluster -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
-  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <!-- Leaflet JS — synchronous so L is defined before mapwatch.js runs.
+       /vendor/ is served from the embedded binary in Docker.
+       For local dev without vendor files, run: ./scripts/download-vendor.sh -->
+  <script src="/vendor/leaflet.js"></script>
+  <script src="/vendor/leaflet.markercluster.js"></script>
+  <script>
+    // CDN fallback: if vendor files were absent (local dev), L will be undefined.
+    if (typeof L === 'undefined') {
+      document.write('<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>');
+      document.write('<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"><\/script>');
+    }
+  </script>
 
 
   <style>
@@ -509,5 +521,25 @@
   <script src="effects/blink.js"></script>
   <script src="effects/heatmap.js"></script>
   <script src="effects/geohash-grid.js"></script>
+
+  <!-- Optional feature modules — loaded only when enabled in mapwatch.yaml (modules:).
+       /api/config exposes {"modules":{"sound":true,...}} after MapWatch init. -->
+  <script>
+    (function() {
+      function dynScript(src) {
+        var s = document.createElement('script'); s.src = src; document.body.appendChild(s);
+      }
+      // fetchConfig is called inside MapWatch.init(); we hook in after a short delay
+      // to ensure the config fetch has completed.  Modules register themselves as effects.
+      fetch('/api/config').then(function(r){ return r.json(); }).then(function(cfg) {
+        var m = cfg.modules || {};
+        if (m.sound)       dynScript('modules/sound.js');
+        if (m.leaderboard) dynScript('modules/leaderboard.js');
+        if (m.stats)       dynScript('modules/stats.js');
+        // Expose leaderboard URL globally so leaderboard.js can use it.
+        if (cfg.leaderboardUrl) window._mwLeaderboardUrl = cfg.leaderboardUrl;
+      }).catch(function(){});
+    })();
+  </script>
 </body>
 </html>

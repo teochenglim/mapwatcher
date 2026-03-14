@@ -1,6 +1,11 @@
 server:
   addr: ":8080"
 
+modules:
+  sound: true        # alert sound on marker.add
+  leaderboard: false # no leaderboard in blink-dot (no RisingWave)
+  stats: false
+
 prometheus:
   url: http://prometheus:9090
   timeout: 10s

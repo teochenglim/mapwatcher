@@ -1,0 +1,142 @@
+# ── MapWatch — Interactive Demo ───────────────────────────────────────────────
+#
+# Full pipeline: tap (mobile.html) → Redpanda → RisingWave → exporter.py
+#                → MapWatch (WebSocket + leaderboard)
+#
+# Features enabled: sound=on, leaderboard=on, stats=on
+#
+# Start:
+#   cd examples/interactive-demo && docker compose up --build
+#
+# Open:
+#   Dashboard          http://localhost:8080
+#   Mobile tap         http://localhost:8080/mobile.html
+#   Redpanda Console   http://localhost:8081   (browse user_taps topic)
+#   RisingWave UI      http://localhost:5691   (streaming graph)
+#
+services:
+
+  # ── MapWatch dashboard ────────────────────────────────────────────────────
+  mapwatch:
+    build:
+      context: ../../
+      dockerfile: examples/interactive-demo/Dockerfile
+    image: ghcr.io/teochenglim/mapwatch:interactive-demo
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./mapwatch.yaml:/mapwatch.yaml:ro
+    environment:
+      MAPWATCH_SERVER_ADDR: ":8080"
+      REDPANDA_BROKERS: "redpanda:29092"
+    depends_on:
+      exporter:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Redpanda (Kafka-compatible message broker) ────────────────────────────
+  redpanda:
+    image: redpandadata/redpanda:v25.3.10
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --memory 512M
+      - --overprovisioned
+      - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:19092
+      - --advertise-kafka-addr PLAINTEXT://redpanda:29092,OUTSIDE://localhost:19092
+    ports:
+      - "19092:19092"   # external (host) access
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info", "--brokers=localhost:29092"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ── Redpanda Console (Kafka topic / message browser) ─────────────────────
+  redpanda-console:
+    image: redpandadata/console:v2.7.2
+    ports:
+      - "8081:8080"
+    environment:
+      KAFKA_BROKERS: "redpanda:29092"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── RisingWave (stream processing, standalone mode) ──────────────────────
+  risingwave:
+    image: risingwavelabs/risingwave:v2.8.0
+    ports:
+      - "4566:4566"   # PostgreSQL wire protocol
+      - "5691:5691"   # HTTP dashboard → http://localhost:5691
+    command: >
+      standalone
+      --meta-opts="
+        --listen-addr 0.0.0.0:5690
+        --advertise-addr risingwave:5690
+        --dashboard-host 0.0.0.0:5691
+        --backend mem
+        --state-store hummock+memory
+        --data-directory rwdata"
+      --compute-opts="
+        --listen-addr 0.0.0.0:5688
+        --advertise-addr risingwave:5688
+        --role both
+        --meta-address http://0.0.0.0:5690
+        --parallelism 4
+        --total-memory-bytes 2147483648"
+      --frontend-opts="
+        --listen-addr 0.0.0.0:4566
+        --advertise-addr risingwave:4566
+        --meta-addr http://0.0.0.0:5690
+        --health-check-listener-addr 0.0.0.0:6786
+        --frontend-total-memory-bytes 500000000"
+      --compactor-opts="
+        --listen-addr 0.0.0.0:6660
+        --advertise-addr risingwave:6660
+        --meta-address http://0.0.0.0:5690
+        --compactor-total-memory-bytes 1000000000"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/4566'"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── Prometheus exporter — also bootstraps topics + DDL on first start ───────
+  exporter:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./exporter.py:/app/exporter.py:ro
+    environment:
+      RW_HOST: risingwave
+      RW_PORT: "4566"
+      REDPANDA_BROKERS: "redpanda:29092"
+      POLL_INTERVAL: "2"
+    command: >
+      sh -c "pip install psycopg2-binary kafka-python --quiet && python3 exporter.py"
+    ports:
+      - "8000:8000"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      risingwave:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Prometheus + Alertmanager are NOT needed in this demo.
+  # Taps reach the MapWatch dashboard directly via POST /api/tap → WebSocket.
+  # Add them back if you want to demo the Prometheus alerting pipeline.

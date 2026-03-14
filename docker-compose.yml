@@ -1,22 +1,24 @@
-# ── MapWatch — Developer stack ────────────────────────────────────────────────
+# ── MapWatch — Developer / baseline demo (modules OFF) ───────────────────────
 #
-# Builds from source (requires Go toolchain / Docker buildkit).
-# For ready-to-run demos see examples/blink-dot/ and examples/heatmap/.
+# Minimal stack: mapwatch + prometheus + alertmanager only.
+# Modules (sound/leaderboard/stats) are all OFF — edit mapwatch.yaml to enable.
+#
+# For the full Redpanda → RisingWave pipeline demo:
+#   cd examples/interactive-demo && docker compose up --build
+#
+# For the blink-dot demo with sound:
+#   cd examples/blink-dot && docker compose up
 #
 # Quick start:
-#   docker compose up -d
+#   docker compose up --build
 #   open http://localhost:8080
-#
-# Alertmanager webhook receiver config (already set in deploy/alertmanager.yml):
-#   receivers:
-#     - name: mapwatch
-#       webhook_configs:
-#         - url: http://mapwatch:8080/api/alerts
-#           send_resolved: true
+#   open http://localhost:8080/mobile.html   ← tap the map
 
 services:
   mapwatch:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: ghcr.io/teochenglim/mapwatch:latest
     ports:
       - "8080:8080"
@@ -27,6 +29,7 @@ services:
       MAPWATCH_PROMETHEUS_URL: "http://prometheus:9090"
     depends_on:
       - prometheus
+      - alertmanager
     restart: unless-stopped
 
   prometheus:

@@ -1,0 +1,15 @@
+global:
+  resolve_timeout: 10s
+
+route:
+  receiver: mapwatch
+  group_by: ['geohash', 'dominant_color']
+  group_wait:      2s    # Q5: fire alerts fast for demo
+  group_interval:  2s
+  repeat_interval: 30s
+
+receivers:
+  - name: mapwatch
+    webhook_configs:
+      - url: http://mapwatch:8080/api/alerts
+        send_resolved: true

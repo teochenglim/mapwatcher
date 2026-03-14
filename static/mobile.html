@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>BlinkTag — Tap the Map</title>
+
+  <!-- Leaflet — vendor first, CDN fallback -->
+  <link rel="stylesheet" href="/vendor/leaflet.css"
+        onerror="this.onerror=null;this.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'" />
+  <script>
+    (function(){
+      function loadScript(src, fallback) {
+        var s = document.createElement('script'); s.src = src;
+        s.onerror = function(){ var f = document.createElement('script'); f.src = fallback; document.head.appendChild(f); };
+        document.head.appendChild(s);
+      }
+      loadScript('/vendor/leaflet.js','https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');
+    })();
+  </script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Landing screen ── */
+    #screen-join {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      padding: 32px;
+    }
+    #screen-join h1 { font-size: 26px; color: #58a6ff; text-align: center; }
+    #screen-join p  { color: #8b949e; text-align: center; font-size: 14px; }
+
+    #username-input {
+      width: 100%;
+      max-width: 320px;
+      padding: 14px 16px;
+      font-size: 16px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      color: #e6edf3;
+      outline: none;
+    }
+    #username-input:focus { border-color: #58a6ff; }
+
+    .join-btn {
+      width: 100%;
+      max-width: 320px;
+      padding: 14px;
+      font-size: 16px;
+      font-weight: 700;
+      background: #1f6feb;
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .join-btn:hover { background: #388bfd; }
+
+    /* ── Color picker screen ── */
+    #screen-color {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 24px;
+    }
+    #screen-color h2 { font-size: 18px; color: #e6edf3; }
+    #screen-color p  { color: #8b949e; font-size: 13px; text-align: center; }
+
+    .color-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      width: 100%;
+      max-width: 340px;
+    }
+    .color-btn {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 10px;
+      border: 2px solid transparent;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: 600;
+      transition: border-color .15s, transform .1s;
+    }
+    .color-btn:active { transform: scale(.97); }
+    .color-btn.selected { border-color: #fff; }
+    .color-swatch {
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,.3);
+      flex-shrink: 0;
+    }
+
+    /* ── Map screen ── */
+    #screen-map {
+      display: none;
+      flex: 1;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #map-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      background: rgba(13,17,23,.95);
+      border-bottom: 1px solid #30363d;
+      flex-shrink: 0;
+      gap: 8px;
+    }
+    #map-header .user-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    #map-header .color-dot {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,.4);
+      flex-shrink: 0;
+    }
+    #tap-status {
+      font-size: 11px;
+      color: #8b949e;
+      text-align: right;
+      min-width: 80px;
+    }
+    #tap-count-badge {
+      background: #1f6feb;
+      color: #fff;
+      border-radius: 10px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    #map { flex: 1; cursor: crosshair !important; min-height: 0; }
+
+    /* ── Event switcher bar ── */
+    #event-bar {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      background: rgba(13,17,23,.97);
+      border-top: 1px solid #30363d;
+    }
+    #event-toggle {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 10px 16px;
+      background: none;
+      border: none;
+      color: #e6edf3;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    #event-toggle .change-hint {
+      font-size: 11px;
+      color: #58a6ff;
+      font-weight: 400;
+    }
+
+    /* ── Event picker overlay ── */
+    #event-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.55);
+      z-index: 3000;
+      align-items: flex-end;
+    }
+    #event-overlay.open { display: flex; }
+    #event-sheet {
+      width: 100%;
+      background: #161b22;
+      border-top: 1px solid #30363d;
+      border-radius: 16px 16px 0 0;
+      padding: 16px 16px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    #event-sheet h3 {
+      text-align: center;
+      font-size: 15px;
+      color: #8b949e;
+      font-weight: 500;
+    }
+
+    #tap-feedback {
+      position: absolute;
+      bottom: 108px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(13,17,23,.88);
+      border: 1px solid #30363d;
+      border-radius: 20px;
+      padding: 6px 16px;
+      font-size: 12px;
+      color: #58a6ff;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .3s;
+      white-space: nowrap;
+      z-index: 2000;
+    }
+    #tap-feedback.show { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<!-- ── Screen 1: Join ── -->
+<div id="screen-join">
+  <h1>🌍 BlinkTag</h1>
+  <p>Tap anywhere on the map to blink a dot<br>visible on the public dashboard.</p>
+  <input id="username-input" type="text" placeholder="Your name" maxlength="24"
+         autocomplete="off" autocorrect="off" spellcheck="false" />
+  <button class="join-btn" onclick="joinStep()">Join →</button>
+</div>
+
+<!-- ── Screen 2: Color picker ── -->
+<div id="screen-color">
+  <h2>Choose your color</h2>
+  <p>Your dots on the map will blink in this color.</p>
+  <div class="color-grid" id="color-grid"></div>
+  <button class="join-btn" style="max-width:340px;margin-top:8px" onclick="mapStep()">
+    Start Tapping →
+  </button>
+</div>
+
+<!-- ── Screen 3: Map ── -->
+<div id="screen-map">
+  <div id="map-header">
+    <div class="user-badge">
+      <div class="color-dot" id="hdr-color-dot"></div>
+      <span id="hdr-username"></span>
+    </div>
+    <div id="tap-status">Taps: <span id="tap-count-badge">0</span></div>
+  </div>
+  <div id="map"></div>
+  <div id="tap-feedback"></div>
+  <div id="event-bar">
+    <button id="event-toggle" onclick="openEventPicker()">
+      <span id="event-bar-emoji">💧</span>
+      <span id="event-bar-label">Flash Flood</span>
+      <span class="change-hint">▲ change</span>
+    </button>
+  </div>
+</div>
+
+<!-- ── Event picker overlay ── -->
+<div id="event-overlay" onclick="overlayClick(event)">
+  <div id="event-sheet">
+    <h3>Switch event type</h3>
+    <div class="color-grid" id="event-grid"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ── Color definitions ─────────────────────────────────────────────────────
+
+  const COLORS = [
+    { hex: '#FF4444', severity: 'critical', emoji: '🚗', label: 'Car Accident',        bg: '#3d1111', fg: '#f85149' },
+    { hex: '#FF8844', severity: 'high',     emoji: '🔥', label: 'Building Fire',       bg: '#2d1a05', fg: '#fb923c' },
+    { hex: '#FFCC44', severity: 'medium',   emoji: '🚧', label: 'Road Congestion',     bg: '#2d2005', fg: '#e3b341' },
+    { hex: '#44FF44', severity: 'low',      emoji: '🌳', label: 'Fallen Tree',         bg: '#0a2d0a', fg: '#3fb950' },
+    { hex: '#4444FF', severity: 'info',     emoji: '💧', label: 'Flash Flood',         bg: '#0d1a3d', fg: '#58a6ff' },
+    { hex: '#AA44FF', severity: 'test',     emoji: '🚨', label: 'Suspicious Activity', bg: '#200d3d', fg: '#c084fc' },
+    { hex: '#FFFFFF', severity: 'debug',    emoji: '👁️', label: 'General Sighting',   bg: '#1c2128', fg: '#e6edf3' },
+  ];
+
+  let username = '';
+  let selectedColor = COLORS[4]; // default Info / Blue
+  let tapCount = 0;
+  let map;
+  let feedbackTimer;
+
+  // ── Screen transitions ────────────────────────────────────────────────────
+
+  function show(id) {
+    ['screen-join','screen-color','screen-map'].forEach(function(s) {
+      var el = document.getElementById(s);
+      el.style.display = (s === id) ? 'flex' : 'none';
+    });
+  }
+
+  window.joinStep = function() {
+    var val = document.getElementById('username-input').value.trim();
+    if (!val) { document.getElementById('username-input').focus(); return; }
+    username = val;
+    buildColorGrid();
+    show('screen-color');
+  };
+
+  document.getElementById('username-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') window.joinStep();
+  });
+
+  window.mapStep = function() {
+    document.getElementById('hdr-username').textContent = username;
+    document.getElementById('hdr-color-dot').textContent = selectedColor.emoji;
+    document.getElementById('hdr-color-dot').style.background = 'transparent';
+    document.getElementById('hdr-color-dot').style.fontSize = '18px';
+    updateEventBar();
+    show('screen-map');
+    if (!map) initMap();
+  };
+
+  function updateEventBar() {
+    document.getElementById('event-bar-emoji').textContent  = selectedColor.emoji;
+    document.getElementById('event-bar-label').textContent  = selectedColor.label;
+    document.getElementById('hdr-color-dot').textContent    = selectedColor.emoji;
+  }
+
+  // ── Event picker overlay ───────────────────────────────────────────────────
+
+  window.openEventPicker = function() {
+    buildEventGrid();
+    document.getElementById('event-overlay').classList.add('open');
+  };
+
+  window.overlayClick = function(e) {
+    // Close when tapping the backdrop (not the sheet itself).
+    if (e.target === document.getElementById('event-overlay')) {
+      document.getElementById('event-overlay').classList.remove('open');
+    }
+  };
+
+  function buildEventGrid() {
+    var grid = document.getElementById('event-grid');
+    grid.innerHTML = '';
+    COLORS.forEach(function(c) {
+      var btn = document.createElement('button');
+      btn.className = 'color-btn' + (c === selectedColor ? ' selected' : '');
+      btn.style.background = c.bg;
+      btn.style.color       = c.fg;
+      btn.innerHTML =
+        '<span style="font-size:22px;line-height:1">' + c.emoji + '</span>' +
+        '<span>' + c.label + '</span>';
+      btn.addEventListener('click', function() {
+        selectedColor = c;
+        updateEventBar();
+        document.getElementById('event-overlay').classList.remove('open');
+      });
+      grid.appendChild(btn);
+    });
+  }
+
+  // ── Color picker ──────────────────────────────────────────────────────────
+
+  function buildColorGrid() {
+    var grid = document.getElementById('color-grid');
+    grid.innerHTML = '';
+    // Default to info (Flash Flood, index 4).
+    var defaultIdx = 4;
+    COLORS.forEach(function(c, i) {
+      var btn = document.createElement('button');
+      btn.className = 'color-btn' + (i === defaultIdx ? ' selected' : '');
+      btn.style.background = c.bg;
+      btn.style.color       = c.fg;
+      btn.innerHTML =
+        '<span style="font-size:22px;line-height:1">' + c.emoji + '</span>' +
+        '<span>' + c.label + '</span>';
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('.color-btn').forEach(function(b) { b.classList.remove('selected'); });
+        btn.classList.add('selected');
+        selectedColor = c;
+      });
+      grid.appendChild(btn);
+    });
+  }
+
+  // ── Map ───────────────────────────────────────────────────────────────────
+
+  // Singapore bounds — default view, user can pan anywhere on world map.
+  var SG_BOUNDS = [[1.159, 103.605], [1.482, 104.088]];
+
+  function initMap() {
+    map = L.map('map', {
+      zoomControl: true,
+      preferCanvas: true,
+    }).fitBounds(SG_BOUNDS, { padding: [20, 20] });
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; CartoDB',
+      subdomains: 'abcd',
+      maxZoom: 19,
+    }).addTo(map);
+
+    map.on('click', onMapTap);
+  }
+
+  // ── Tap handling ──────────────────────────────────────────────────────────
+
+  function onMapTap(e) {
+    var lat = e.latlng.lat;
+    var lng = e.latlng.lng;
+
+    // Visual flash marker — show emoji at tap location (fades after 8 s).
+    var markerEl = document.createElement('div');
+    markerEl.style.cssText = 'font-size:28px;line-height:1;filter:drop-shadow(0 2px 4px rgba(0,0,0,.6))';
+    markerEl.textContent = selectedColor.emoji;
+    var emojiIcon = L.divIcon({ className: '', html: markerEl.outerHTML, iconSize: [32, 32], iconAnchor: [16, 16] });
+    var dot = L.marker([lat, lng], { icon: emojiIcon }).addTo(map);
+    setTimeout(function() { map.removeLayer(dot); }, 8000);
+
+    // Haptic feedback on mobile.
+    if (navigator.vibrate) navigator.vibrate(30);
+
+    tapCount++;
+    document.getElementById('tap-count-badge').textContent = tapCount;
+
+    // Send to MapWatch.
+    sendTap(lat, lng);
+
+    // Show feedback with event name.
+    showFeedback(selectedColor.emoji + ' ' + selectedColor.label + ' reported');
+  }
+
+  function sendTap(lat, lng) {
+    fetch('/api/tap', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username:  username,
+        color:     selectedColor.hex,
+        severity:  selectedColor.severity,
+        lat:       lat,
+        lng:       lng,
+        session_id: sessionId(),
+        timestamp: new Date().toISOString(),
+      }),
+    }).catch(function() {});
+  }
+
+  function showFeedback(coords) {
+    var el = document.getElementById('tap-feedback');
+    el.textContent = coords;
+    el.classList.add('show');
+    clearTimeout(feedbackTimer);
+    feedbackTimer = setTimeout(function() { el.classList.remove('show'); }, 1800);
+  }
+
+  // ── Session ID (persisted in sessionStorage) ──────────────────────────────
+
+  var _sessionId;
+  function sessionId() {
+    if (!_sessionId) {
+      _sessionId = sessionStorage.getItem('mw_sid');
+      if (!_sessionId) {
+        _sessionId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+        sessionStorage.setItem('mw_sid', _sessionId);
+      }
+    }
+    return _sessionId;
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────────
+
+  show('screen-join');
+
+})();
+</script>
+</body>
+</html>

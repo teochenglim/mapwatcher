@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,15 +11,20 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
+	kafka "github.com/segmentio/kafka-go"
 	"github.com/teochenglim/mapwatch/internal/config"
 	"github.com/teochenglim/mapwatch/internal/geo"
 	"github.com/teochenglim/mapwatch/internal/marker"
 	"github.com/teochenglim/mapwatch/internal/transformer"
 )
+
+// leaderboardClient is a small HTTP client for proxying leaderboard requests.
+var leaderboardClient = &http.Client{Timeout: 5 * time.Second}
 
 // Handlers wires the REST API and WebSocket endpoint.
 type Handlers struct {
@@ -30,8 +36,11 @@ type Handlers struct {
 	locations       map[string]string      // name → geohash, for /api/config baseline dots
 	heatmapRegions  []config.HeatmapRegion // optional region aggregation zones
 	layers          config.LayersConfig    // optional overlay auto-enable settings
+	modules         config.ModulesConfig   // optional frontend feature modules
+	leaderboardURL  string                 // upstream leaderboard API (proxied at /api/leaderboard)
 	dataDir         string                 // directory for locally-downloaded GeoJSON files
 	upgrader        *websocket.Upgrader
+	kafkaWriter     *kafka.Writer          // optional; nil if no broker configured
 }
 
 // validGeoJSONName matches safe file identifiers (letters, digits, hyphens, underscores).
@@ -104,6 +113,90 @@ func (h *Handlers) PostAlerts(w http.ResponseWriter, r *http.Request) {
 		"updated": updated,
 		"removed": removed,
 	})
+}
+
+// PostTap handles POST /api/tap — mobile tap events from static/mobile.html.
+// Converts a tap into a marker and broadcasts it via WebSocket.
+// Body: { username, color, severity, lat, lng, session_id, timestamp }
+func (h *Handlers) PostTap(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<10))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	var tap struct {
+		Username  string  `json:"username"`
+		Color     string  `json:"color"`
+		Severity  string  `json:"severity"`
+		Lat       float64 `json:"lat"`
+		Lng       float64 `json:"lng"`
+		SessionID string  `json:"session_id"`
+		Timestamp string  `json:"timestamp"`
+	}
+	if err := json.Unmarshal(body, &tap); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid tap JSON: " + err.Error()})
+		return
+	}
+	if tap.Lat == 0 && tap.Lng == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "lat/lng required"})
+		return
+	}
+
+	// Map color to standard severity if not provided.
+	if tap.Severity == "" {
+		colorSev := map[string]string{
+			"#ff4444": "critical", "#FF4444": "critical",
+			"#ff8844": "warning",  "#FF8844": "warning",
+			"#ffcc44": "warning",  "#FFCC44": "warning",
+			"#44ff44": "info",     "#44FF44": "info",
+			"#4444ff": "info",     "#4444FF": "info",
+			"#aa44ff": "info",     "#AA44FF": "info",
+		}
+		tap.Severity = colorSev[tap.Color]
+		if tap.Severity == "" {
+			tap.Severity = "info"
+		}
+	}
+
+	m := &marker.Marker{
+		ID:        tap.SessionID + "-" + tap.Timestamp,
+		AlertName: "UserTap",
+		Severity:  tap.Severity,
+		Lat:       tap.Lat,
+		Lng:       tap.Lng,
+		Source:    "tap",
+		Labels: map[string]string{
+			"username":       tap.Username,
+			"dominant_color": tap.Color,
+			"session_id":     tap.SessionID,
+		},
+		Annotations: map[string]string{
+			"summary": fmt.Sprintf("%s tapped at %.4f, %.4f", tap.Username, tap.Lat, tap.Lng),
+		},
+	}
+
+	isNew, colocated := h.store.Upsert(m)
+	if isNew {
+		h.hub.BroadcastAdd(m)
+	} else {
+		h.hub.BroadcastUpdate(m)
+	}
+	for _, co := range colocated {
+		h.hub.BroadcastUpdate(co)
+	}
+
+	// Publish raw tap to Kafka so RisingWave can aggregate it for the leaderboard.
+	if h.kafkaWriter != nil {
+		msg, _ := json.Marshal(tap)
+		if err := h.kafkaWriter.WriteMessages(context.Background(),
+			kafka.Message{Value: msg},
+		); err != nil {
+			log.Printf("kafka publish: %v", err)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, m)
 }
 
 // PostMarkers handles POST /api/markers — generic marker upsert.
@@ -279,7 +372,59 @@ func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {
 			"busRoutes": h.layers.BusRoutes,
 		},
 		"availableLayers": availableLayers,
+		"modules": map[string]bool{
+			"sound":       h.modules.Sound,
+			"leaderboard": h.modules.Leaderboard,
+			"stats":       h.modules.Stats,
+		},
+		"leaderboardUrl": h.leaderboardURL,
 	})
+}
+
+// GetLeaderboard handles GET /api/leaderboard — proxies to the configured upstream.
+// Returns 503 when leaderboard_url is not configured.
+func (h *Handlers) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
+	if h.leaderboardURL == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "leaderboard_url not configured",
+		})
+		return
+	}
+
+	resp, err := leaderboardClient.Get(h.leaderboardURL) //nolint:noctx
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		log.Printf("GetLeaderboard: copy error: %v", err)
+	}
+}
+
+// PostLeaderboardClear handles POST /api/leaderboard/clear — proxies to upstream clear endpoint.
+func (h *Handlers) PostLeaderboardClear(w http.ResponseWriter, r *http.Request) {
+	if h.leaderboardURL == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "leaderboard_url not configured",
+		})
+		return
+	}
+	clearURL := strings.TrimSuffix(h.leaderboardURL, "/leaderboard") + "/leaderboard/clear"
+	resp, err := leaderboardClient.Post(clearURL, "application/json", http.NoBody) //nolint:noctx
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		log.Printf("PostLeaderboardClear: copy error: %v", err)
+	}
 }
 
 // ServeGeoJSON handles GET /api/geojson/{name} — serves a locally-downloaded GeoJSON file.

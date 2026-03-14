@@ -18,6 +18,21 @@ type Config struct {
 	Heatmap        HeatmapConfig              `mapstructure:"heatmap"`
 	Layers         LayersConfig               `mapstructure:"layers"`
 	GeoPriority    []string                   `mapstructure:"geo_label_priority"`
+	Modules        ModulesConfig              `mapstructure:"modules"`
+	LeaderboardURL string                     `mapstructure:"leaderboard_url"`
+}
+
+// ModulesConfig controls optional frontend feature modules.
+// All modules default to false (disabled). Enable per-example via mapwatch.yaml.
+//
+//   modules:
+//     sound: true       # Web Audio API tones on marker.add
+//     leaderboard: true # leaderboard sidebar (requires leaderboard_url)
+//     stats: true       # live tap/alert counter overlay
+type ModulesConfig struct {
+	Sound       bool `mapstructure:"sound"`
+	Leaderboard bool `mapstructure:"leaderboard"`
+	Stats       bool `mapstructure:"stats"`
 }
 
 // LayersConfig controls which optional GeoJSON overlays are enabled at startup.

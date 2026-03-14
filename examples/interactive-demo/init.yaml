@@ -1,0 +1,13 @@
+clusters:
+  - name: MapWatch Demo
+    version: v2.8.0
+    connections:
+      sqlEndpoint: "risingwave:4566"
+      metaRpcEndpoint: "http://risingwave:5690"
+      metaHttpEndpoint: "http://risingwave:5691"
+
+databases:
+  - name: dev
+    cluster: MapWatch Demo
+    username: root
+    database: dev

@@ -1,20 +1,25 @@
 # ── Build stage ──────────────────────────────────────────────────────────────
+#
+# Interactive-demo — includes sound, leaderboard, stats modules.
+# Vendor assets and WAV files are generated and embedded at build time.
+#
+# Build:  docker build -f examples/interactive-demo/Dockerfile -t mapwatch-demo .
+# Run:    docker run -p 8080:8080 mapwatch-demo
+#
 FROM golang:1.23-alpine AS builder
 
 WORKDIR /src
 
-# Cache dependencies separately from source
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source
 COPY . .
 
-# Download Leaflet vendor assets (offline map UI)
+# Download Leaflet vendor assets (offline map tiles CSS/JS).
 RUN apk add --no-cache curl && \
     sh scripts/download-vendor.sh
 
-# Generate WAV notification sounds (pure Python stdlib)
+# Generate WAV notification sounds (pure Python stdlib).
 RUN apk add --no-cache python3 && \
     python3 scripts/generate-sounds.py
 
@@ -23,25 +28,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w" \
     -o /mapwatch ./cmd/mapwatch
 
-# Download all GeoJSON layers (no API key required)
-RUN /mapwatch download-sg division  --out /data && \
-    /mapwatch download-sg roads     --out /data && \
-    /mapwatch download-sg cycling   --out /data && \
-    /mapwatch download-sg mrt       --out /data && \
-    /mapwatch download-sg busstops  --out /data && \
-    /mapwatch download-sg busroutes --out /data
-
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM scratch
 
-# Copy TLS certs (needed for HTTPS outbound calls to Prometheus/CDN)
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-
-# Copy binary and pre-downloaded GeoJSON data
 COPY --from=builder /mapwatch /mapwatch
-COPY --from=builder /data /data
 
 EXPOSE 8080
 
 ENTRYPOINT ["/mapwatch"]
-CMD ["serve", "--data-dir", "/data"]
+CMD ["serve"]

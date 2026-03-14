@@ -732,9 +732,9 @@ It drives everything — the Go binary embed, Docker image tag, and git tag.
 **Workflow:**
 
 ```bash
-git add . \
+git add .
 git commit -m "release $$VER - awesome feature"
-make release v=0.5.4
+make release v=0.6.0
 ```
 
 That single command bumps `VERSION`, commits, tags, and pushes — triggering the GitHub Actions release pipeline.

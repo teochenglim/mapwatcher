@@ -15,8 +15,18 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source and build
+# Copy source
 COPY . .
+
+# Download Leaflet vendor assets for offline use (embedded via go:embed).
+RUN apk add --no-cache curl && \
+    sh scripts/download-vendor.sh
+
+# Generate WAV sound files (pure Python stdlib, no pip deps).
+RUN apk add --no-cache python3 && \
+    python3 scripts/generate-sounds.py
+
+# Build binary (vendor + sounds are now inside static/ and will be embedded).
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
     -ldflags="-s -w" \

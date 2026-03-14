@@ -1,0 +1,24 @@
+server:
+  addr: ":8080"
+
+# No Prometheus in this demo — markers arrive via POST /api/tap → WebSocket directly.
+# Uncomment and add prometheus/alertmanager services if you want the alerting pipeline.
+# prometheus:
+#   url: http://prometheus:9090
+
+# Singapore datacenters — green baseline dots.
+locations:
+  sg-dc-1: w21zd3   # Singapore CBD
+  sg-dc-2: w21z8k   # Singapore West
+  sg-dc-3: w21zb    # Singapore North
+  sg-dc-4: w21ze    # Singapore East
+  sg-dc-5: w21z9    # Singapore Central
+
+# Optional modules — all on for the interactive demo.
+modules:
+  sound: true
+  leaderboard: true
+  stats: true
+
+# Leaderboard API served by the exporter (proxied by MapWatch at /api/leaderboard).
+leaderboard_url: http://exporter:8000/leaderboard
