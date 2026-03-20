@@ -318,7 +318,7 @@ if __name__ == '__main__':
 ║  Mobile tap page     →  http://localhost:8080/mobile.html║
 ╠══════════════════════════════════════════════════════════╣
 ║  Redpanda Console    →  http://localhost:8081            ║
-║  RisingWave UI       →  http://localhost:5690            ║
+║  RisingWave UI       →  http://localhost:5691            ║
 ╚══════════════════════════════════════════════════════════╝
 """, flush=True)
 
