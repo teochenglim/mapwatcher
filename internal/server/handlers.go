@@ -33,14 +33,16 @@ type Handlers struct {
 	amTrans         *transformer.AlertmanagerTransformer
 	promProxy       *transformer.PromProxy
 	promExternalURL string
-	locations       map[string]string      // name → geohash, for /api/config baseline dots
-	heatmapRegions  []config.HeatmapRegion // optional region aggregation zones
-	layers          config.LayersConfig    // optional overlay auto-enable settings
-	modules         config.ModulesConfig   // optional frontend feature modules
-	leaderboardURL  string                 // upstream leaderboard API (proxied at /api/leaderboard)
-	dataDir         string                 // directory for locally-downloaded GeoJSON files
+	locations       map[string]string        // name → geohash, for /api/config baseline dots
+	heatmapRegions  []config.HeatmapRegion   // optional region aggregation zones
+	layers          config.LayersConfig      // optional overlay auto-enable settings (legacy)
+	modules         config.ModulesConfig     // optional frontend feature modules
+	leaderboardURL  string                   // upstream leaderboard API (proxied at /api/leaderboard)
+	dataDir         string                   // directory for locally-downloaded GeoJSON files
+	tileConfigs     []config.TileConfig      // dynamic tile themes from mapwatch.yaml tiles:
+	layerDefConfigs []config.LayerDefConfig  // dynamic layer defs from mapwatch.yaml layer_defs:
 	upgrader        *websocket.Upgrader
-	kafkaWriter     *kafka.Writer          // optional; nil if no broker configured
+	kafkaWriter     *kafka.Writer            // optional; nil if no broker configured
 }
 
 // validGeoJSONName matches safe file identifiers (letters, digits, hyphens, underscores).
@@ -342,7 +344,8 @@ func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Check which GeoJSON data files are present on disk so the frontend can
 	// show or hide layer buttons without doing N parallel HEAD probes.
-	layerFiles := map[string]string{
+	// Legacy hard-coded SG layer file names are always checked for backward compat.
+	legacyLayerFiles := map[string]string{
 		"division":  "sg-npc-boundary",
 		"roads":     "sg-roads",
 		"cycling":   "sg-cycling",
@@ -350,14 +353,25 @@ func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {
 		"busStops":  "sg-bus-stops",
 		"busRoutes": "sg-bus-routes",
 	}
-	availableLayers := make(map[string]bool, len(layerFiles))
-	for key, file := range layerFiles {
+	availableLayers := make(map[string]bool)
+	for key, file := range legacyLayerFiles {
 		_, err := os.Stat(filepath.Join(h.dataDir, file+".geojson"))
 		availableLayers[key] = err == nil
 	}
+	// Dynamic layer defs (from layer_defs: in mapwatch.yaml) override/extend the map.
+	for _, def := range h.layerDefConfigs {
+		_, err := os.Stat(filepath.Join(h.dataDir, def.File+".geojson"))
+		availableLayers[def.ID] = err == nil
+	}
 
-	log.Printf("[config] GET /api/config: locations=%d heatmapRegions=%d prometheusUrl=%s",
-		len(locs), len(regions), h.promExternalURL)
+	// Build tiles_config: use configured tiles or fall back to built-in defaults.
+	tilesConfig := h.buildTilesConfig()
+
+	// Build layers_config: use configured layer_defs or fall back to built-in defaults.
+	layersConfig := h.buildLayersConfig()
+
+	log.Printf("[config] GET /api/config: locations=%d heatmapRegions=%d prometheusUrl=%s tiles=%d layers=%d",
+		len(locs), len(regions), h.promExternalURL, len(tilesConfig), len(layersConfig))
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"prometheusUrl":  h.promExternalURL,
@@ -372,6 +386,8 @@ func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {
 			"busRoutes": h.layers.BusRoutes,
 		},
 		"availableLayers": availableLayers,
+		"tiles_config":    tilesConfig,
+		"layers_config":   layersConfig,
 		"modules": map[string]bool{
 			"sound":       h.modules.Sound,
 			"leaderboard": h.modules.Leaderboard,
@@ -379,6 +395,61 @@ func (h *Handlers) GetConfig(w http.ResponseWriter, r *http.Request) {
 		},
 		"leaderboardUrl": h.leaderboardURL,
 	})
+}
+
+// buildTilesConfig returns the tile theme list for the frontend.
+// If tiles are configured in mapwatch.yaml (tiles: section), those are used.
+// Otherwise the built-in dark/light/satellite defaults are returned so existing
+// deployments keep working without any config change.
+func (h *Handlers) buildTilesConfig() []config.TileConfig {
+	if len(h.tileConfigs) > 0 {
+		return h.tileConfigs
+	}
+	return []config.TileConfig{
+		{ID: "dark", Label: "Dark", URL: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", Attribution: "&copy; CartoDB", Default: true},
+		{ID: "light", Label: "Light", URL: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", Attribution: "&copy; CartoDB"},
+		{ID: "satellite", Label: "Satellite", URL: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", Attribution: "&copy; Esri"},
+	}
+}
+
+// buildLayersConfig returns the GeoJSON overlay layer list for the frontend.
+// If layer_defs are configured in mapwatch.yaml, those are used.
+// Otherwise the built-in 6 SG layer defaults are returned, with their enabled
+// flags taken from the legacy layers: config section for full backward compat.
+func (h *Handlers) buildLayersConfig() []config.LayerDefConfig {
+	if len(h.layerDefConfigs) > 0 {
+		return h.layerDefConfigs
+	}
+	return []config.LayerDefConfig{
+		{
+			ID: "division", Label: "Divisions", File: "sg-npc-boundary", Enabled: h.layers.Division,
+			Style:   config.LayerStyleConfig{Type: "polygon", Color: "#4fc3f7", Weight: 1.5, Opacity: 0.8, FillColor: "#4fc3f7", FillOpacity: 0.06},
+			Tooltip: config.LayerTooltipConfig{NameProps: []string{"NPC_NAME", "Name", "name"}, SubProps: []string{"DIVISION", "Division"}},
+		},
+		{
+			ID: "roads", Label: "Roads", File: "sg-roads", Enabled: h.layers.Roads,
+			Style: config.LayerStyleConfig{Type: "line_conditional", Color: "#f97316", Opacity: 0.65},
+		},
+		{
+			ID: "cycling", Label: "Cycling", File: "sg-cycling", Enabled: h.layers.Cycling,
+			Style: config.LayerStyleConfig{Type: "line", Color: "#4ade80", Weight: 2, Opacity: 0.8, DashArray: "6,4"},
+		},
+		{
+			ID: "mrt", Label: "MRT", File: "sg-mrt", Enabled: h.layers.MRT,
+			Style:   config.LayerStyleConfig{Type: "line", Color: "#e11d48", Weight: 3, Opacity: 0.9},
+			Tooltip: config.LayerTooltipConfig{NameProps: []string{"name", "ref"}},
+		},
+		{
+			ID: "busStops", Label: "Bus Stops", File: "sg-bus-stops", Enabled: h.layers.BusStops,
+			Style:   config.LayerStyleConfig{Type: "point", Color: "#f59e0b", FillColor: "#f59e0b", Radius: 3, Weight: 1, Opacity: 0.8, FillOpacity: 0.6},
+			Tooltip: config.LayerTooltipConfig{NameProps: []string{"name", "code"}, SubProps: []string{"road"}},
+		},
+		{
+			ID: "busRoutes", Label: "Bus Routes", File: "sg-bus-routes", Enabled: h.layers.BusRoutes,
+			Style:   config.LayerStyleConfig{Type: "line", Color: "#60a5fa", Weight: 1, Opacity: 0.45},
+			Tooltip: config.LayerTooltipConfig{NameProps: []string{"service"}, SubProps: []string{"operator"}},
+		},
+	}
 }
 
 // GetLeaderboard handles GET /api/leaderboard — proxies to the configured upstream.

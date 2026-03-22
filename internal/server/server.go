@@ -54,6 +54,8 @@ func New(cfg *config.Config, staticFS http.FileSystem, dataDir string) *http.Ser
 		modules:         cfg.Modules,
 		leaderboardURL:  cfg.LeaderboardURL,
 		dataDir:         dataDir,
+		tileConfigs:     cfg.Tiles,
+		layerDefConfigs: cfg.LayerDefs,
 		upgrader:        upgrader,
 		kafkaWriter:     kw,
 	}

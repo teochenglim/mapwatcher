@@ -454,10 +454,8 @@
 
     <div class="tb-sep"></div>
 
-    <!-- Theme -->
-    <button class="tb-btn active" id="btn-dark"      onclick="MapWatch.setTheme('dark')">Dark</button>
-    <button class="tb-btn"        id="btn-light"     onclick="MapWatch.setTheme('light')">Light</button>
-    <button class="tb-btn"        id="btn-satellite" onclick="MapWatch.setTheme('satellite')">Satellite</button>
+    <!-- Theme buttons — built dynamically from tiles: in mapwatch.yaml via /api/config -->
+    <div id="tb-themes" style="display:contents"></div>
 
     <div class="tb-sep"></div>
 
@@ -468,21 +466,11 @@
 
     <div class="tb-sep"></div>
 
-    <!-- Overlays (data files optional — see mapwatch download-sg) -->
+    <!-- Overlays: heatmap is always present; GeoJSON layer buttons built dynamically
+         from layer_defs: in mapwatch.yaml via /api/config (hidden if file not downloaded) -->
     <button class="tb-btn active" id="btn-heatmap"
             onclick="if(MapWatch.toggleHeatmap){MapWatch.toggleHeatmap();this.classList.toggle('active')}">Heatmap</button>
-    <button class="tb-btn" id="btn-layer-division"
-            onclick="MapWatch.toggleLayer('division',this)">Divisions</button>
-    <button class="tb-btn" id="btn-layer-roads"
-            onclick="MapWatch.toggleLayer('roads',this)">Roads</button>
-    <button class="tb-btn" id="btn-layer-cycling"
-            onclick="MapWatch.toggleLayer('cycling',this)">Cycling</button>
-    <button class="tb-btn" id="btn-layer-mrt"
-            onclick="MapWatch.toggleLayer('mrt',this)">MRT</button>
-    <button class="tb-btn" id="btn-layer-busstops"
-            onclick="MapWatch.toggleLayer('busStops',this)">Bus Stops</button>
-    <button class="tb-btn" id="btn-layer-busroutes"
-            onclick="MapWatch.toggleLayer('busRoutes',this)">Bus Routes</button>
+    <div id="tb-layers" style="display:contents"></div>
 
     <div class="tb-sep"></div>
 

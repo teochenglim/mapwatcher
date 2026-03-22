@@ -63,10 +63,117 @@ heatmap:
 #   - location
 #   - region
 
+# ── Base-map tile themes ──────────────────────────────────────────────────────
+# Each entry creates one theme button in the toolbar.
+# id:      unique key used for the button ID (btn-<id>) and setTheme() call
+# url:     Leaflet tile URL template — {z}/{x}/{y} plus optional {s} subdomains, {r} for retina
+# default: first entry with default: true is active on page load (falls back to first entry)
+# To add a new tile: append an entry here. No JS or HTML changes needed.
+tiles:
+  - id: dark
+    label: Dark
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+    attribution: "&copy; <a href='https://carto.com/'>CartoDB</a> &copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a>"
+    default: true
+  - id: light
+    label: Light
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+    attribution: "&copy; <a href='https://carto.com/'>CartoDB</a> &copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a>"
+  - id: streets
+    label: Streets
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+    attribution: "&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors"
+  - id: satellite
+    label: Satellite
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+    attribution: "&copy; <a href='https://www.esri.com/'>Esri</a>"
+
 # ── Optional map overlays ─────────────────────────────────────────────────────
-# Pre-download data files with: mapwatch download-sg <layer>
-# Set true to auto-enable the overlay at startup; false = toolbar-only.
-# All sources are open data — no API key required.
+# Each entry creates one toggle button in the toolbar.
+# Data files must be downloaded first: mapwatch download-sg <layer>
+# enabled: true  → auto-toggle on at startup (if the file exists)
+# enabled: false → button shown, layer off by default
+# To add a new layer: append an entry here. No JS or HTML changes needed.
+layer_defs:
+  - id: division
+    label: Divisions
+    file: sg-npc-boundary
+    enabled: true
+    style:
+      type: polygon
+      color: "#4fc3f7"
+      weight: 1.5
+      opacity: 0.8
+      fill_color: "#4fc3f7"
+      fill_opacity: 0.06
+    tooltip:
+      name_props: [NPC_NAME, Name, name]
+      sub_props: [DIVISION, Division]
+
+  - id: roads
+    label: Roads
+    file: sg-roads
+    enabled: true
+    style:
+      type: line_conditional   # weight varies: motorway/trunk=3, others=2
+      color: "#f97316"
+      opacity: 0.65
+
+  - id: cycling
+    label: Cycling
+    file: sg-cycling
+    enabled: true
+    style:
+      type: line
+      color: "#4ade80"
+      weight: 2
+      opacity: 0.8
+      dash_array: "6,4"
+
+  - id: mrt
+    label: MRT
+    file: sg-mrt
+    enabled: true
+    style:
+      type: line
+      color: "#e11d48"
+      weight: 3
+      opacity: 0.9
+    tooltip:
+      name_props: [name, ref]
+
+  - id: busStops
+    label: Bus Stops
+    file: sg-bus-stops
+    enabled: true
+    style:
+      type: point
+      color: "#f59e0b"
+      fill_color: "#f59e0b"
+      radius: 3
+      weight: 1
+      opacity: 0.8
+      fill_opacity: 0.6
+    tooltip:
+      name_props: [name, code]
+      sub_props: [road]
+
+  - id: busRoutes
+    label: Bus Routes
+    file: sg-bus-routes
+    enabled: true
+    style:
+      type: line
+      color: "#60a5fa"
+      weight: 1
+      opacity: 0.45
+    tooltip:
+      name_props: [service]
+      sub_props: [operator]
+
+# ── Legacy layer enable flags (kept for backward compatibility) ───────────────
+# These are superseded by the enabled: field in layer_defs above.
+# Kept here so older mapwatch binaries (without layer_defs support) still work.
 layers:
   division:   true   # NPC police division boundaries   → mapwatch download-sg division
   roads:      true   # expressways + major roads         → mapwatch download-sg roads

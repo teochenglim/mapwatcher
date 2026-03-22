@@ -85,11 +85,11 @@
       inset: -7px;
       border-radius: 50%;
       border: 3px dashed #FF4444;
-      animation: mw-gyro-spin 0.9s linear infinite;
+      animation: mw-gyro-spin 0.45s linear infinite;
       pointer-events: none;
     }
     .mw-ev-gyro .mw-ev-emoji {
-      animation: mw-gyro-shake 0.55s ease-in-out infinite;
+      animation: mw-gyro-shake 0.28s ease-in-out infinite;
       display: inline-block;
     }
 
@@ -103,7 +103,7 @@
       85%     { opacity: 0.5; transform: scale(0.96); }
     }
     .mw-ev-flicker .mw-ev-emoji {
-      animation: mw-flicker 0.75s ease-in-out infinite;
+      animation: mw-flicker 0.35s ease-in-out infinite;
       display: inline-block;
     }
 
@@ -113,7 +113,7 @@
       45%     { transform: translateY(-6px); }
     }
     .mw-ev-bounce .mw-ev-emoji {
-      animation: mw-bounce 1.1s ease-in-out infinite;
+      animation: mw-bounce 0.55s ease-in-out infinite;
       display: inline-block;
     }
 
@@ -124,7 +124,7 @@
       70%     { transform: rotate(9deg);  }
     }
     .mw-ev-sway .mw-ev-emoji {
-      animation: mw-sway 2.4s ease-in-out infinite;
+      animation: mw-sway 1.2s ease-in-out infinite;
       display: inline-block;
       transform-origin: bottom center;
     }
@@ -139,7 +139,7 @@
       inset: 0;
       border-radius: 50%;
       border: 2px solid #4444FF;
-      animation: mw-ripple 1.5s ease-out infinite;
+      animation: mw-ripple 0.75s ease-out infinite;
       pointer-events: none;
     }
 
@@ -150,7 +150,7 @@
       100%    { opacity: 1;    }
     }
     .mw-ev-flash .mw-ev-emoji {
-      animation: mw-flash 0.65s step-end infinite;
+      animation: mw-flash 0.3s step-end infinite;
       display: inline-block;
     }
 
@@ -159,7 +159,7 @@
       0%,100% { box-shadow: 0 0 0 0   rgba(139,148,158,0.7); }
       50%     { box-shadow: 0 0 0 9px rgba(139,148,158,0);   }
     }
-    .mw-ev-pulse { animation: mw-ev-pulse 1.6s ease-out infinite; }
+    .mw-ev-pulse { animation: mw-ev-pulse 0.8s ease-out infinite; }
   `;
 
   const styleEl = document.createElement('style');

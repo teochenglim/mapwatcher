@@ -15,7 +15,10 @@
     unknown:  '#8b949e',
   };
 
-  const THEMES = {
+  // THEMES is populated dynamically from /api/config (tiles_config).
+  // The defaults here are used only for the initial tile layer created in init()
+  // before the config fetch completes.
+  let THEMES = {
     dark: {
       url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
       attribution: '&copy; CartoDB',
@@ -29,6 +32,8 @@
       attribution: '&copy; Esri',
     },
   };
+  // Current tile attribution text tracked for correct swap on theme change.
+  let _currentAttribution = THEMES.dark.attribution;
 
   // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -55,57 +60,14 @@
   let selectRect         = null;   // L.Rectangle shown while dragging
   let selectedSubLayers  = [];     // [{ sublayer, key }] — for color restoration
 
-  // ── SG Overlay layers (all lazy-loaded, all off by default) ──────────────────
-  // Each entry: { layer, visible, loading }
+  // ── GeoJSON overlay layers ────────────────────────────────────────────────────
+  // Both populated dynamically by _buildLayersFromConfig() once /api/config loads.
 
-  const layerState = {
-    division:  { layer: null, visible: false, loading: false },
-    roads:     { layer: null, visible: false, loading: false },
-    cycling:   { layer: null, visible: false, loading: false },
-    mrt:       { layer: null, visible: false, loading: false },
-    busStops:  { layer: null, visible: false, loading: false },
-    busRoutes: { layer: null, visible: false, loading: false },
-  };
+  // layer key → { layer (Leaflet), visible, loading }
+  let layerState = {};
 
-  // Map layer key → { geojsonFile, geoJSONOptions, cmdSuffix }
-  const LAYER_DEFS = {
-    division: {
-      file: 'sg-npc-boundary',
-      options: { style: _styleNPC, onEachFeature: _onEachNPC },
-      cmd: 'division',
-    },
-    roads: {
-      file: 'sg-roads',
-      options: { style: _styleRoads },
-      cmd: 'roads',
-    },
-    cycling: {
-      file: 'sg-cycling',
-      options: { style: _styleCycling },
-      cmd: 'cycling',
-    },
-    mrt: {
-      file: 'sg-mrt',
-      options: { style: _styleMRT, onEachFeature: _onEachMRT },
-      cmd: 'mrt',
-    },
-    busStops: {
-      file: 'sg-bus-stops',
-      options: {
-        pointToLayer: (_f, latlng) => L.circleMarker(latlng, {
-          radius: 3, fillColor: '#f59e0b', color: '#f59e0b',
-          weight: 1, opacity: 0.8, fillOpacity: 0.6,
-        }),
-        onEachFeature: _onEachBusStop,
-      },
-      cmd: 'busstops',
-    },
-    busRoutes: {
-      file: 'sg-bus-routes',
-      options: { style: _styleBusRoutes, onEachFeature: _onEachBusRoute },
-      cmd: 'busroutes',
-    },
-  };
+  // layer key → { file, options (Leaflet geoJSON options), cmd }
+  let LAYER_DEFS  = {};
 
   // ── Initialise map ────────────────────────────────────────────────────────────
 
@@ -201,23 +163,34 @@
         if (cfg && Array.isArray(cfg.heatmapRegions)) {
           heatmapRegions = cfg.heatmapRegions;
           window.MapWatch.heatmapRegions = heatmapRegions;
-          // Markers may have already arrived via WS before config loaded.
-          // Re-run effects so the heatmap can draw with the now-known regions.
+          // Markers may have arrived via WS before config loaded — re-run effects.
           runEffects({ type: 'config.loaded' });
         }
-        // Show or hide layer buttons based on which GeoJSON files exist on disk
-        // (reported by the server in availableLayers — no HEAD probes needed).
-        for (const [key] of Object.entries(LAYER_DEFS)) {
-          const available = cfg.availableLayers && cfg.availableLayers[key];
-          const btn = document.getElementById('btn-layer-' + key.toLowerCase());
-          if (btn) btn.style.display = available ? '' : 'none';
+
+        // ── Dynamic tile themes ───────────────────────────────────────────────
+        // tiles_config from server drives button creation and URL switching.
+        if (cfg.tiles_config && cfg.tiles_config.length) {
+          _buildThemesFromConfig(cfg.tiles_config);
         }
-        // Auto-enable layers configured in mapwatch.yaml (only if file is present).
-        if (cfg.layers) {
-          for (const [key, enabled] of Object.entries(cfg.layers)) {
-            if (enabled && layerState[key]) {
-              const btn = document.getElementById('btn-layer-' + key.toLowerCase());
-              if (btn && btn.style.display !== 'none') _toggleLayer(key, btn);
+
+        // ── Dynamic GeoJSON overlay layers ───────────────────────────────────
+        // layers_config from server drives button creation, styling, and auto-enable.
+        if (cfg.layers_config && cfg.layers_config.length) {
+          _buildLayersFromConfig(cfg.layers_config, cfg.availableLayers);
+        } else {
+          // Legacy path: LAYER_DEFS/layerState were pre-populated; just show/hide
+          // buttons based on file availability and honour the layers: enable flags.
+          for (const [key] of Object.entries(LAYER_DEFS)) {
+            const available = cfg.availableLayers && cfg.availableLayers[key];
+            const btn = document.getElementById('btn-layer-' + key.toLowerCase());
+            if (btn) btn.style.display = available ? '' : 'none';
+          }
+          if (cfg.layers) {
+            for (const [key, enabled] of Object.entries(cfg.layers)) {
+              if (enabled && layerState[key]) {
+                const btn = document.getElementById('btn-layer-' + key.toLowerCase());
+                if (btn && btn.style.display !== 'none') _toggleLayer(key, btn);
+              }
             }
           }
         }
@@ -556,9 +529,17 @@
     const t = THEMES[name];
     if (!t) return;
     tileLayer.setUrl(t.url);
-    ['dark', 'light', 'satellite'].forEach((n) => {
-      document.getElementById('btn-' + n).classList.toggle('active', n === name);
-    });
+    // Swap Leaflet attribution text for correct legal attribution per theme.
+    if (map && map.attributionControl && t.attribution !== undefined) {
+      if (_currentAttribution) map.attributionControl.removeAttribution(_currentAttribution);
+      map.attributionControl.addAttribution(t.attribution);
+      _currentAttribution = t.attribution;
+    }
+    // Toggle active class on all dynamically-built theme buttons.
+    for (const id of Object.keys(THEMES)) {
+      const btn = document.getElementById('btn-' + id);
+      if (btn) btn.classList.toggle('active', id === name);
+    }
   }
 
   // ── Map navigation ────────────────────────────────────────────────────────────
@@ -573,82 +554,179 @@
     map.setZoom(parseInt(z, 10));
   }
 
-  // ── SG overlay layer system ───────────────────────────────────────────────────
+  // ── GeoJSON overlay layer system ─────────────────────────────────────────────
   //
-  // All layers are optional and lazy-loaded on first toggle.
-  // Style helpers are prefixed with _ to distinguish from public API.
+  // Layers are defined in mapwatch.yaml (layer_defs:) and built dynamically by
+  // _buildLayersFromConfig() called from fetchConfig(). All layers are optional
+  // and lazy-loaded on first toggle.
 
-  function _styleNPC(_feature) {
-    return { color: '#4fc3f7', weight: 1.5, opacity: 0.8, fillColor: '#4fc3f7', fillOpacity: 0.06 };
-  }
+  /**
+   * Build Leaflet geoJSON options from a layer's style/tooltip config object.
+   * style.type: polygon | line | line_conditional | point
+   */
+  function _buildLayerOptions(cfg) {
+    const s  = cfg.style || {};
+    const tt = _buildTooltipFn(cfg.tooltip);
 
-  function _onEachNPC(feature, layer) {
-    const p = feature.properties || {};
-    const name = p.NPC_NAME || p.Name || p.name || '';
-    const div  = p.DIVISION  || p.Division  || '';
-    if (name) {
-      layer.bindTooltip(
-        `<div class="mw-tt-title">${e(name)}</div>` +
-        (div ? `<div class="mw-tt-row">Division: ${e(div)}</div>` : ''),
-        { sticky: true, className: 'mw-tooltip', opacity: 1 }
-      );
+    if (s.type === 'point') {
+      return {
+        pointToLayer: (_f, latlng) => L.circleMarker(latlng, {
+          radius:      s.radius      || 4,
+          fillColor:   s.fill_color  || s.color,
+          color:       s.color,
+          weight:      s.weight      || 1,
+          opacity:     s.opacity     || 0.8,
+          fillOpacity: s.fill_opacity || 0.6,
+        }),
+        onEachFeature: tt || undefined,
+      };
     }
-  }
 
-  function _styleRoads(feature) {
-    const hw = (feature.properties && feature.properties.highway) || '';
-    const weight = /motorway|trunk/.test(hw) ? 3 : 2;
-    return { color: '#f97316', weight, opacity: 0.65, fillOpacity: 0 };
-  }
-
-  function _styleCycling(_feature) {
-    return { color: '#4ade80', weight: 2, opacity: 0.8, fillOpacity: 0, dashArray: '6,4' };
-  }
-
-  function _styleMRT(_feature) {
-    return { color: '#e11d48', weight: 3, opacity: 0.9, fillOpacity: 0 };
-  }
-
-  function _onEachMRT(feature, layer) {
-    const p = feature.properties || {};
-    const name = p.name || p.ref || '';
-    if (name) {
-      layer.bindTooltip(`<div class="mw-tt-title">${e(name)}</div>`,
-        { sticky: true, className: 'mw-tooltip', opacity: 1 });
+    if (s.type === 'line_conditional') {
+      // Weight varies by highway property (roads layer).
+      return {
+        style: (feature) => {
+          const hw     = (feature.properties && feature.properties.highway) || '';
+          const weight = /motorway|trunk/.test(hw) ? 3 : 2;
+          return { color: s.color, weight, opacity: s.opacity || 0.8, fillOpacity: 0 };
+        },
+        onEachFeature: tt || undefined,
+      };
     }
+
+    // polygon or plain line
+    const baseStyle = {
+      color:       s.color,
+      weight:      s.weight      || 2,
+      opacity:     s.opacity     || 0.8,
+      fillOpacity: s.type === 'polygon' ? (s.fill_opacity || 0) : 0,
+    };
+    if (s.fill_color) baseStyle.fillColor = s.fill_color;
+    if (s.dash_array) baseStyle.dashArray = s.dash_array;
+
+    return { style: () => baseStyle, onEachFeature: tt || undefined };
   }
 
-  function _onEachBusStop(feature, layer) {
-    const p = feature.properties || {};
-    if (p.name || p.code) {
-      layer.bindTooltip(
-        `<div class="mw-tt-title">${e(p.name || p.code)}</div>` +
-        (p.road ? `<div class="mw-tt-row">${e(p.road)}</div>` : '') +
-        (p.code ? `<div class="mw-tt-row">Stop: ${e(p.code)}</div>` : ''),
-        { sticky: true, className: 'mw-tooltip', opacity: 1 }
-      );
+  /**
+   * Build a Leaflet onEachFeature function from a tooltip config object.
+   * Reads name_props (title) and sub_props (subtitle) from feature properties.
+   * Returns null if no tooltip config is provided.
+   */
+  function _buildTooltipFn(tooltip) {
+    if (!tooltip) return null;
+    return function(feature, layer) {
+      const p = feature.properties || {};
+
+      let name = '';
+      if (tooltip.name_props) {
+        for (const prop of tooltip.name_props) {
+          if (p[prop]) { name = p[prop]; break; }
+        }
+      }
+      let sub = '';
+      if (tooltip.sub_props) {
+        for (const prop of tooltip.sub_props) {
+          if (p[prop]) { sub = p[prop]; break; }
+        }
+      }
+
+      if (name || sub) {
+        layer.bindTooltip(
+          (name ? `<div class="mw-tt-title">${e(name)}</div>` : '') +
+          (sub  ? `<div class="mw-tt-row">${e(sub)}</div>`   : ''),
+          { sticky: true, className: 'mw-tooltip', opacity: 1 }
+        );
+      }
+    };
+  }
+
+  /**
+   * Derive the style object used to restore a sub-layer after selection highlight.
+   */
+  function _buildRestoreStyle(style) {
+    if (!style) return {};
+    const s = { color: style.color, opacity: style.opacity || 0.8 };
+    if (style.type === 'polygon') {
+      s.fillColor  = style.fill_color || style.color;
+      s.fillOpacity = style.fill_opacity || 0.06;
     }
+    if (style.type === 'point') {
+      s.fillColor   = style.fill_color || style.color;
+      s.fillOpacity = style.fill_opacity || 0.6;
+      s.weight      = style.weight || 1;
+    }
+    if (style.type === 'line' || style.type === 'line_conditional') {
+      s.weight = style.weight || 2;
+    }
+    return s;
   }
 
-  function _styleBusRoutes(_feature) {
-    return { color: '#60a5fa', weight: 1, opacity: 0.45, fillOpacity: 0 };
+  /**
+   * Build tile theme buttons and populate THEMES from a tiles_config array
+   * (tiles: section in mapwatch.yaml, served by /api/config as tiles_config).
+   * Called once from fetchConfig() when the server response arrives.
+   */
+  function _buildThemesFromConfig(tilesCfg) {
+    const container = document.getElementById('tb-themes');
+    if (container) container.innerHTML = '';  // clear any stale buttons
+    THEMES = {};
+    for (const t of tilesCfg) {
+      THEMES[t.id] = { url: t.url, attribution: t.attribution || '' };
+      if (container) {
+        const btn       = document.createElement('button');
+        btn.className   = 'tb-btn';
+        btn.id          = 'btn-' + t.id;
+        btn.textContent = t.label;
+        btn.onclick     = () => MapWatch.setTheme(t.id);
+        container.appendChild(btn);
+      }
+    }
+    // Activate the default theme (first entry marked default:true, or first entry).
+    const def = tilesCfg.find(t => t.default) || tilesCfg[0];
+    if (def) setTheme(def.id);
   }
 
-  function _onEachBusRoute(feature, layer) {
-    const p = feature.properties || {};
-    if (p.service) {
-      layer.bindTooltip(
-        `<div class="mw-tt-title">Bus ${e(p.service)}</div>` +
-        (p.operator  ? `<div class="mw-tt-row">${e(p.operator)}</div>` : '') +
-        (p.direction ? `<div class="mw-tt-row">Dir ${e(p.direction)}</div>` : ''),
-        { sticky: true, className: 'mw-tooltip', opacity: 1 }
-      );
+  /**
+   * Build GeoJSON overlay layer buttons and populate layerState/LAYER_DEFS from
+   * a layers_config array (layer_defs: in mapwatch.yaml, served by /api/config).
+   * availableLayers is the per-key boolean map from the server (file existence check).
+   * Called once from fetchConfig() when the server response arrives.
+   */
+  function _buildLayersFromConfig(layersCfg, availableLayers) {
+    const container = document.getElementById('tb-layers');
+    if (container) container.innerHTML = '';  // clear any stale buttons
+
+    for (const cfg of layersCfg) {
+      layerState[cfg.id] = { layer: null, visible: false, loading: false };
+      LAYER_DEFS[cfg.id] = {
+        file:    cfg.file,
+        options: _buildLayerOptions(cfg),
+        cmd:     cfg.id,
+      };
+      _SELECT_ORIG_STYLES[cfg.id] = _buildRestoreStyle(cfg.style);
+      _LAYER_LABELS[cfg.id]       = cfg.label;
+
+      // Hide button if the GeoJSON file hasn't been downloaded yet.
+      const isAvailable = !availableLayers || availableLayers[cfg.id] !== false;
+
+      if (container) {
+        const btn       = document.createElement('button');
+        btn.className   = 'tb-btn';
+        btn.id          = 'btn-layer-' + cfg.id.toLowerCase();
+        btn.textContent = cfg.label;
+        btn.onclick     = () => _toggleLayer(cfg.id, btn);
+        if (!isAvailable) btn.style.display = 'none';
+        container.appendChild(btn);
+
+        // Auto-enable layers marked enabled: true (only if file is present).
+        if (cfg.enabled && isAvailable) _toggleLayer(cfg.id, btn);
+      }
     }
   }
 
   /**
-   * Generic layer toggle factory.
-   * Lazy-fetches /api/geojson/{def.file} on first call, then just shows/hides.
+   * Generic layer toggle: lazy-fetches /api/geojson/{def.file} on first call,
+   * then shows/hides on subsequent toggles.
    */
   function _toggleLayer(key, btn) {
     const state = layerState[key];
@@ -698,23 +776,9 @@
   // Works with any layer in layerState: bus stops, bus routes, MRT, roads, etc.
 
   const _SELECT_HIGHLIGHT = '#22d3ee';   // cyan — selection highlight colour
-  const _SELECT_ORIG_STYLES = {          // per-layer default styles for restoration
-    busStops:  { fillColor: '#f59e0b', color: '#f59e0b', weight: 1, opacity: 0.8, fillOpacity: 0.6 },
-    busRoutes: { color: '#60a5fa', weight: 1, opacity: 0.45 },
-    roads:     { color: '#f97316', opacity: 0.65 },
-    cycling:   { color: '#4ade80', opacity: 0.8 },
-    mrt:       { color: '#e11d48', opacity: 0.9 },
-    division:  { color: '#4fc3f7', opacity: 0.8, fillOpacity: 0.06 },
-  };
-
-  const _LAYER_LABELS = {
-    division:  'Divisions',
-    roads:     'Roads',
-    cycling:   'Cycling Paths',
-    mrt:       'MRT Lines',
-    busStops:  'Bus Stops',
-    busRoutes: 'Bus Routes',
-  };
+  // Per-layer restore styles and display labels — populated by _buildLayersFromConfig().
+  let _SELECT_ORIG_STYLES = {};
+  let _LAYER_LABELS       = {};
 
   function toggleSelectionMode() {
     if (selectionMode) _disableSelect();

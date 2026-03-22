@@ -20,6 +20,50 @@ type Config struct {
 	GeoPriority    []string                   `mapstructure:"geo_label_priority"`
 	Modules        ModulesConfig              `mapstructure:"modules"`
 	LeaderboardURL string                     `mapstructure:"leaderboard_url"`
+	Tiles          []TileConfig               `mapstructure:"tiles"`
+	LayerDefs      []LayerDefConfig           `mapstructure:"layer_defs"`
+}
+
+// TileConfig defines a base-map tile theme served to the frontend.
+// Add entries under tiles: in mapwatch.yaml to add new basemaps without
+// changing any JS or HTML — the frontend builds buttons dynamically.
+type TileConfig struct {
+	ID          string `mapstructure:"id"          json:"id"`
+	Label       string `mapstructure:"label"       json:"label"`
+	URL         string `mapstructure:"url"         json:"url"`
+	Attribution string `mapstructure:"attribution" json:"attribution"`
+	Default     bool   `mapstructure:"default"     json:"default,omitempty"`
+}
+
+// LayerStyleConfig describes the Leaflet rendering style for a GeoJSON overlay.
+// type: polygon | line | line_conditional | point
+type LayerStyleConfig struct {
+	Type        string  `mapstructure:"type"         json:"type"`
+	Color       string  `mapstructure:"color"        json:"color"`
+	FillColor   string  `mapstructure:"fill_color"   json:"fill_color,omitempty"`
+	Weight      float64 `mapstructure:"weight"       json:"weight,omitempty"`
+	Opacity     float64 `mapstructure:"opacity"      json:"opacity,omitempty"`
+	FillOpacity float64 `mapstructure:"fill_opacity" json:"fill_opacity,omitempty"`
+	DashArray   string  `mapstructure:"dash_array"   json:"dash_array,omitempty"`
+	Radius      float64 `mapstructure:"radius"       json:"radius,omitempty"`
+}
+
+// LayerTooltipConfig specifies which GeoJSON feature properties appear in hover tooltips.
+type LayerTooltipConfig struct {
+	NameProps []string `mapstructure:"name_props" json:"name_props,omitempty"`
+	SubProps  []string `mapstructure:"sub_props"  json:"sub_props,omitempty"`
+}
+
+// LayerDefConfig describes a named GeoJSON overlay layer.
+// Add entries under layer_defs: in mapwatch.yaml to add new overlays without
+// changing any JS or HTML — the frontend builds buttons and applies styles dynamically.
+type LayerDefConfig struct {
+	ID      string             `mapstructure:"id"      json:"id"`
+	Label   string             `mapstructure:"label"   json:"label"`
+	File    string             `mapstructure:"file"    json:"file"`
+	Enabled bool               `mapstructure:"enabled" json:"enabled"`
+	Style   LayerStyleConfig   `mapstructure:"style"   json:"style"`
+	Tooltip LayerTooltipConfig `mapstructure:"tooltip" json:"tooltip,omitempty"`
 }
 
 // ModulesConfig controls optional frontend feature modules.

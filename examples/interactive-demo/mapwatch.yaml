@@ -1,6 +1,26 @@
 server:
   addr: ":8080"
 
+# ── Base-map tile themes ──────────────────────────────────────────────────────
+tiles:
+  - id: dark
+    label: Dark
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+    attribution: "&copy; CartoDB"
+    default: true
+  - id: light
+    label: Light
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+    attribution: "&copy; CartoDB"
+  - id: streets
+    label: Streets
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+    attribution: "&copy; OpenStreetMap contributors"
+  - id: satellite
+    label: Satellite
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+    attribution: "&copy; Esri"
+
 # No Prometheus in this demo — markers arrive via POST /api/tap → WebSocket directly.
 # Uncomment and add prometheus/alertmanager services if you want the alerting pipeline.
 # prometheus:
